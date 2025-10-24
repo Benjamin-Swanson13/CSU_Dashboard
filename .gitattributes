@@ -1,0 +1,2 @@
+assets/CSU_EPAWQData_Beta_*.csv filter=lfs diff=lfs merge=lfs -text
+util/beta_result.csv filter=lfs diff=lfs merge=lfs -text
