@@ -643,6 +643,41 @@ exchange_gdf = gpd.read_file('21CW3XXX_Pts.shp')
 exchange_gdf = exchange_gdf.to_crs('EPSG:4326')  # Reproject from NAD83 UTM Zone 13N to WGS84
 print(f"Loaded {len(exchange_gdf)} exchange features and reprojected to EPSG:4326")
 
+# Load streams/rivers
+try:
+    print("\n" + "="*80)
+    print("LOADING STREAMS SHAPEFILE")
+    print("="*80)
+    streams_gdf = gpd.read_file('StreamsRivers.shp')
+    print(f"✓ Loaded {len(streams_gdf)} stream/river features")
+    print(f"  Original CRS: {streams_gdf.crs}")
+    
+    streams_gdf = streams_gdf.to_crs('EPSG:4326')
+    print(f"  Reprojected to: {streams_gdf.crs}")
+    
+    # Debug: Check what columns are available
+    print(f"  Columns: {streams_gdf.columns.tolist()}")
+    print(f"  First 3 records:")
+    for idx, row in streams_gdf.head(3).iterrows():
+        for col in streams_gdf.columns:
+            if 'name' in col.lower() or col == 'PNAME':
+                print(f"    [{col}]: {row[col]}")
+    print("="*80 + "\n")
+    
+except FileNotFoundError:
+    streams_gdf = None
+    print("="*80)
+    print("⚠ StreamsRivers.shp not found in current directory")
+    print(f"Current directory: {os.getcwd()}")
+    print("="*80 + "\n")
+except Exception as e:
+    streams_gdf = None
+    print("="*80)
+    print(f"⚠ Error loading StreamsRivers.shp: {e}")
+    import traceback
+    traceback.print_exc()
+    print("="*80 + "\n")
+
 # Convert Color to integer since it's stored as string
 exchange_gdf['Color'] = pd.to_numeric(exchange_gdf['Color'], errors='coerce').astype('Int64')
 print(f"Converted Color column to numeric. Values: {exchange_gdf['Color'].unique()}")
@@ -903,7 +938,16 @@ huc_centroids = pd.read_csv('HUC8_Centroids.csv')
 huc_to_name = dict(zip(huc_centroids['huc8'], huc_centroids['name']))  
 name_to_huc = dict(zip(huc_centroids['name'], huc_centroids['huc8']))
 
-CHARACTERISTICS = ['All'] + sorted(CSU_df['Result_Characteristic'].unique().tolist())
+# Get base characteristics from WQX data
+base_characteristics = sorted(CSU_df['Result_Characteristic'].unique().tolist())
+
+# Add USGS daily specific conductance if USGS data is available
+if HAS_USGS_DATA:
+    base_characteristics.append('Specific conductance (USGS-daily)')
+    base_characteristics = sorted(base_characteristics)
+
+CHARACTERISTICS = ['All'] + base_characteristics
+
 BASINS = ['All'] + sorted(huc_centroids['name'].unique().tolist())
 FRACTIONS = sorted(CSU_df['Result_SampleFraction'].dropna().unique())
 SAMPLE_TYPES = ['All'] + sorted(CSU_df['Activity_MediaSubdivision'].dropna().unique().tolist())
@@ -1038,6 +1082,26 @@ app.layout = html.Div(
                 html.Div([
                     html.H3('Monitoring Locations', 
                            style={'color': '#ffffff', 'margin-bottom': '15px', 'font-size': '18px'}),
+                    
+                    # Rivers & Streams Dropdown (above the map)
+                    html.Div([
+                        html.Label('Rivers & Streams:', 
+                                style={'color': '#ffffff', 'font-weight': 'bold', 'margin-right': '10px', 'display': 'inline-block'}),
+                        dcc.Dropdown(
+                            id='rivers-toggle',  
+                            options=[],  
+                            value=[],
+                            multi=True,
+                            placeholder='Select rivers/streams to display...',
+                            style={
+                                'width': '500px', 
+                                'display': 'inline-block',
+                                'verticalAlign': 'middle'
+                            }
+                        )
+                    ], style={'margin-bottom': '15px', 'display': 'flex', 'alignItems': 'center'}),
+            
+                    
                     dcc.Graph(
                         id="basin-map",
                         figure=dict(
@@ -1199,8 +1263,7 @@ app.layout = html.Div(
                                         id='additional-data-toggle',
                                         options=[
                                             {'label': ' WQX Flow (spot measurements)', 'value': 'wqx_flow'},
-                                            {'label': ' USGS Daily Flow', 'value': 'usgs_flow'},
-                                            {'label': ' USGS Daily Specific Conductance', 'value': 'usgs_sc'}
+                                            {'label': ' USGS Daily Flow', 'value': 'usgs_flow'}
                                         ],
                                         value=[],
                                         style={'color': '#ffffff'},
@@ -1482,6 +1545,87 @@ def update_site_options(basin):
         return options, ['All']
 
 
+# Temporary - just to see what's in the file
+#streams_gdf = gpd.read_file('StreamsRivers.shp')
+#print(streams_gdf.columns.tolist())
+#print(streams_gdf.head())
+
+@app.callback(
+    Output('rivers-toggle', 'options'),
+    [Input('basin-select', 'value')]
+)
+def update_rivers_dropdown(basin):
+    """Populate rivers dropdown with Arkansas River and tributaries"""
+    
+    if streams_gdf is None:
+        return [{'label': 'No streams data available', 'value': 'none', 'disabled': True}]
+    
+    try:
+        print(f"\n=== UPDATE RIVERS DROPDOWN ===")
+        print(f"Basin selected: {basin}")
+        
+        # Show ALL streams matching Arkansas River system
+        arkansas_keywords = [
+            'ARKANSAS',
+            'FOUNTAIN',
+            'ST. CHARLES', 
+            'ST CHARLES',
+            'HUERFANO',
+            'APISHAPA',
+            'PURGATOIRE',
+            'HORSE',
+            'TIMPAS',
+            'CROOKED',
+            'SALT'
+        ]
+        
+        # Filter streams - look in PNAME column
+        filtered_streams = streams_gdf[
+            streams_gdf['PNAME'].str.contains('|'.join(arkansas_keywords), case=False, na=False)
+        ]
+        
+        print(f"Found {len(filtered_streams)} stream segments matching Arkansas system")
+        
+        # Get unique river names
+        river_names = sorted(filtered_streams['PNAME'].dropna().unique())
+        
+        print(f"Unique river names: {river_names}")
+        
+        if len(river_names) == 0:
+            return [{'label': 'No Arkansas River system streams found', 'value': 'none', 'disabled': True}]
+        
+        # Create options with "All" at top
+        options = [{'label': 'All Rivers & Streams', 'value': 'All'}]
+        
+        # Separate Arkansas River from tributaries
+        arkansas_rivers = [name for name in river_names if 'ARKANSAS' in name.upper()]
+        tributaries = [name for name in river_names if 'ARKANSAS' not in name.upper()]
+        
+        # Add Arkansas River section
+        if arkansas_rivers:
+            options.append({'label': '--- Arkansas River ---', 'value': 'header_ark', 'disabled': True})
+            for name in sorted(arkansas_rivers):
+                display_name = name.title() 
+                options.append({'label': f"  {name}", 'value': name})
+        
+        # Add Tributaries section
+        if tributaries:
+            options.append({'label': '--- Tributaries ---', 'value': 'header_trib', 'disabled': True})
+            for name in sorted(tributaries):
+                display_name = name.title()
+                options.append({'label': f"  {name}", 'value': name})
+        
+        print(f"Returning {len(options)} dropdown options")
+        print("=== END RIVERS DROPDOWN ===\n")
+        
+        return options
+        
+    except Exception as e:
+        print(f"❌ Error populating rivers dropdown: {e}")
+        import traceback
+        traceback.print_exc()
+        return [{'label': 'Error loading rivers', 'value': 'error', 'disabled': True}]
+
 # Callback to open modal and populate site statistics
 @app.callback(
     [Output('site-modal', 'is_open'),
@@ -1649,8 +1793,6 @@ def toggle_site_modal(clickData, close_clicks, date_range, is_open):
 )
 def update_characteristic_options(basin, site):
     """Update characteristic dropdown based on selected basin and monitoring location"""
-    print(f"\n=== CHARACTERISTIC CALLBACK DEBUG ===")
-    print(f"Basin: {basin}, Site: {site}, Site type: {type(site)}")
 
     # Handle site being a list (multi-select)
     site_list = []
@@ -1683,6 +1825,12 @@ def update_characteristic_options(basin, site):
             available_characteristics = sorted(list(common_characteristics))
             print(f"Found {len(available_characteristics)} COMMON characteristics across {len(site_list)} sites")
         
+        # ADD USGS OPTION if data is available
+        if HAS_USGS_DATA:
+            available_characteristics = list(available_characteristics)
+            available_characteristics.append('Specific conductance (USGS-daily)')
+            available_characteristics = sorted(available_characteristics)
+
         if len(available_characteristics) == 0:
             if len(site_list) > 1:
                 options = [{'label': 'No common characteristics at selected sites', 'value': 'All'}]
@@ -1747,6 +1895,12 @@ def update_characteristic_options(basin, site):
             
             print(f"Found {len(available_characteristics)} characteristics in basin")
             
+            # ADD USGS OPTION
+            if HAS_USGS_DATA:
+                available_characteristics = list(available_characteristics)
+                available_characteristics.append('Specific conductance (USGS-daily)')
+                available_characteristics = sorted(available_characteristics)
+
             # Create options
             if len(available_characteristics) == 0:
                 options = [{'label': 'No data in selected basin', 'value': 'All'}]
@@ -1768,6 +1922,13 @@ def update_characteristic_options(basin, site):
     # PRIORITY 3: No filters - show all characteristics
     print(f">>> No filters - showing all characteristics")
     available_characteristics = sorted(CSU_df['Result_Characteristic'].dropna().unique())
+
+    # ADD USGS OPTION
+    if HAS_USGS_DATA:
+        available_characteristics = list(available_characteristics)
+        available_characteristics.append('Specific conductance (USGS-daily)')
+        available_characteristics = sorted(available_characteristics)
+
     options = [{'label': 'All', 'value': 'All'}] + [{'label': char, 'value': char} for char in available_characteristics]
     return options, 'All'
 
@@ -1976,11 +2137,12 @@ def update_exchange_dropdown(basin):
      Input('site-select', 'value'),
      Input('canal-select', 'value'),
      Input('exchange-select', 'value'),
+     Input('rivers-toggle', 'value'),
      Input('sample-type-select', 'value'),
      Input('date-slider', 'value')
     ]
 )
-def highlight_basin(characteristic, fraction, basin, site, selected_canals, selected_exchange, sample_type, date_range):
+def highlight_basin(characteristic, fraction, basin, site, selected_canals, selected_exchange, rivers_toggle, sample_type, date_range):
     print(f"Debug: Selected basin = {basin}")
     print(f"Debug: Selected canals = {selected_canals}")
 
@@ -2102,10 +2264,6 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             df_mean = df.groupby('Location_Name', as_index=False).agg(agg_dict)
             df_mean['Result_Characteristic'] = characteristic
             
-            # Assign colors
-            colors, min_val, max_val = assign_continuous_color_scale(df_mean)
-            df_mean['color'] = colors
-
             # Get non-selected stations (outside the basin or different characteristics)
             non_selected = CSU_df[~CSU_df['Location_Name'].isin(df_mean['Location_Name'].unique())]
 
@@ -2120,15 +2278,15 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                     name='Other Stations',
                     showlegend=False
                 ),
-                dict(  # Color-coded points for selected basin/characteristic
+                dict(  # Blue points for selected basin/characteristic (CHANGED from color-coded)
                     lat=df_mean['Location_LatitudeStandardized'],
                     lon=df_mean['Location_LongitudeStandardized'],
                     type='scattermapbox',
                     hovertext=[f"{name}<br>{char}: {val:.2f}" for name, char, val in
-                              zip(df_mean['Location_Name'],
-                                  df_mean['Result_Characteristic'],
-                                  df_mean['Result_Measure'])],
-                    marker=dict(size=10, color=df_mean['color'], opacity=1),
+                            zip(df_mean['Location_Name'],
+                                df_mean['Result_Characteristic'],
+                                df_mean['Result_Measure'])],
+                    marker=dict(size=10, color='blue', opacity=1),  # ← Changed to 'blue' instead of df_mean['color']
                     name='Selected Data',
                     showlegend=False
                 ),
@@ -2428,6 +2586,127 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
     else:
         print("Debug: No exchange points selected")
 
+    # Add rivers/streams if toggle is checked
+    if rivers_toggle and len(rivers_toggle) > 0 and streams_gdf is not None:
+        try:
+            print(f"\n=== ADDING RIVERS TO MAP ===")
+            print(f"Rivers toggle value: {rivers_toggle}")
+            print(f"Current data traces before adding rivers: {len(data)}")
+            
+            # Convert to WGS84 for display
+            rivers_to_show = streams_gdf.to_crs('EPSG:4326')
+            
+            # Determine which rivers to show
+            show_all = 'All' in rivers_toggle
+            selected_rivers = [r for r in rivers_toggle if r != 'All']
+            
+            # Filter to selected rivers if not "All"
+            if not show_all and len(selected_rivers) > 0:
+                rivers_to_show = rivers_to_show[rivers_to_show['PNAME'].isin(selected_rivers)]
+                print(f"Filtered to {len(selected_rivers)} selected rivers: {selected_rivers}")
+                print(f"River segments after filter: {len(rivers_to_show)}")
+            else:
+                print(f"Showing all {len(rivers_to_show)} river segments")
+            
+            # Color scheme
+            river_colors = {
+                'arkansas': '#1E90FF',       # Dodger Blue - main stem
+                'fountain': '#4169E1',       # Royal Blue
+                'st. charles': '#6495ED',    # Cornflower Blue
+                'st charles': '#6495ED',     
+                'huerfano': '#00CED1',       # Dark Turquoise
+                'apishapa': '#20B2AA',       # Light Sea Green
+                'purgatoire': '#48D1CC',     # Medium Turquoise
+                'horse': '#40E0D0',          # Turquoise
+                'timpas': '#5F9EA0',         # Cadet Blue
+                'crooked': '#87CEEB',        # Sky Blue
+                'salt': '#87CEFA'            # Light Sky Blue
+            }
+            
+            # Group by river name
+            unique_rivers = rivers_to_show['PNAME'].dropna().unique()
+            print(f"Processing {len(unique_rivers)} unique rivers")
+            
+            traces_added = 0
+            for river_name in unique_rivers:
+                river_segments = rivers_to_show[rivers_to_show['PNAME'] == river_name]
+                print(f"\nProcessing river: {river_name}")
+                print(f"  Number of segments: {len(river_segments)}")
+                
+                # Determine color and width
+                color = '#4682B4'  # Default Steel Blue
+                line_width = 2
+                
+                river_name_lower = str(river_name).lower()
+                for keyword, keyword_color in river_colors.items():
+                    if keyword in river_name_lower:
+                        color = keyword_color
+                        if keyword == 'arkansas':
+                            line_width = 4  # Arkansas River is thicker
+                        break
+                
+                # Extract coordinates
+                lons = []
+                lats = []
+                segments_processed = 0
+                for idx, row in river_segments.iterrows():
+                    geom = row.geometry
+                    if geom is None:
+                        continue
+                    
+                    segments_processed += 1
+                    
+                    try:
+                        if geom.geom_type == 'LineString':
+                            line_lons, line_lats = geom.xy
+                            lons.extend(list(line_lons))
+                            lats.extend(list(line_lats))
+                            lons.append(None)
+                            lats.append(None)
+                        elif geom.geom_type == 'MultiLineString':
+                            for line in geom.geoms:
+                                line_lons, line_lats = line.xy
+                                lons.extend(list(line_lons))
+                                lats.extend(list(line_lats))
+                                lons.append(None)
+                                lats.append(None)
+                    except Exception as e:
+                        print(f"  ⚠ Error processing geometry: {e}")
+                        continue
+                
+                if lons and lats:
+                    # Check coordinate ranges
+                    valid_lons = [x for x in lons if x is not None]
+                    valid_lats = [y for y in lats if y is not None]
+                    
+                    if valid_lons and valid_lats:
+                        river_name_display = river_name.title()
+                        
+                        river_trace = dict(
+                            lat=lats,
+                            lon=lons,
+                            type='scattermapbox',
+                            mode='lines',
+                            line=dict(width=line_width, color=color),
+                            hovertemplate=f'<b>🌊 {river_name_display}</b><extra></extra>',
+                            name=river_name_display,
+                            showlegend=True,
+                            legendgroup='rivers'
+                        )
+                        data.append(river_trace)
+                        traces_added += 1
+
+            
+        except Exception as e:
+            print(f"❌ ERROR adding rivers: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        if streams_gdf is None:
+            print("Debug: streams_gdf is None - shapefile not loaded")
+        elif not rivers_toggle or len(rivers_toggle) == 0:
+            print(f"Debug: Rivers toggle is empty (value: {rivers_toggle})")
+
     # Update layout with the highlighted basin 
     layout = dict(
         mapbox=dict(
@@ -2517,6 +2796,226 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
         except Exception as e:
             print(f"Debug: Error processing click data: {e}")
             pass
+    # Check if USGS daily specific conductance was selected
+    is_usgs_spc = (characteristic == 'Specific conductance (USGS-daily)')
+    
+    # If USGS SpC selected, handle it specially
+    if is_usgs_spc and HAS_USGS_DATA:
+        # Get USGS data
+        selected_sites = [site] if isinstance(site, str) and site else (site if isinstance(site, list) else [])
+        
+        usgs_sc_data = get_usgs_data_for_sites(
+            USGS_df,
+            selected_sites,
+            USGS_MAPPING,
+            date_range,
+            parameter='SpCond_uScm'
+        )
+        
+        if usgs_sc_data.empty:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No USGS Specific Conductance data available for selected filters",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                showarrow=False,
+                font=dict(size=16, color="white")
+            )
+            fig.update_layout(
+                plot_bgcolor='#2d2d2d',
+                paper_bgcolor='#1e1e1e',
+                font=dict(color='white'),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                title="Time Series Analysis - No USGS Data",
+                title_font=dict(color='white')
+            )
+            return fig
+        
+        # Create figure with USGS SpC data
+        fig = go.Figure()
+        
+        primary_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        
+        for idx, usgs_site_name in enumerate(usgs_sc_data['Site_Name'].unique()):
+            site_sc = usgs_sc_data[usgs_sc_data['Site_Name'] == usgs_site_name]
+            
+            fig.add_trace(go.Scatter(
+                x=site_sc['Date'],
+                y=site_sc['SpCond_uScm'],
+                mode='lines',
+                name=f'{usgs_site_name}',
+                yaxis='y1',
+                showlegend=True,
+                line=dict(width=2, color=primary_colors[idx % len(primary_colors)]),
+                opacity=0.8,
+                hovertemplate='<b>%{fullData.name}</b><br>' +
+                            'Date: %{x|%Y-%m-%d}<br>' +
+                            'SpCond: %{y:.0f} µS/cm<br>' +
+                            '<extra></extra>'
+            ))
+        
+        # Check if additional flow data requested
+        has_secondary_axis = False
+        
+        # Add WQX Flow if requested
+        if additional_data and 'wqx_flow' in additional_data:
+            try:
+                flow_data = filter_data(CSU_df, 'Flow', None, basin, site, sample_type, date_range[0], date_range[1])
+                
+                if flow_data is not None and not flow_data.empty:
+                    has_secondary_axis = True
+                    
+                    for idx, location in enumerate(flow_data['Location_Name'].unique()):
+                        location_flow = flow_data[flow_data['Location_Name'] == location].copy()
+                        
+                        fig.add_trace(go.Scatter(
+                            x=location_flow['Activity_StartDate'],
+                            y=location_flow['Result_Measure'],
+                            mode='markers',
+                            name=f'{location} (WQX Flow)',
+                            yaxis='y2',
+                            showlegend=True,
+                            marker=dict(size=10, symbol='diamond', opacity=0.8, 
+                                      color=primary_colors[idx % len(primary_colors)]),
+                            hovertemplate='<b>%{fullData.name}</b><br>' +
+                                         'Date: %{x|%Y-%m-%d}<br>' +
+                                         'Flow: %{y:.2f} cfs<br>' +
+                                         '<extra></extra>'
+                        ))
+            except Exception as e:
+                print(f"Error adding WQX flow data: {e}")
+        
+        # Add USGS Daily Flow if requested
+        if additional_data and 'usgs_flow' in additional_data and HAS_USGS_DATA:
+            try:
+                # Get selected sites (convert to list if needed)
+                selected_sites = [site] if isinstance(site, str) and site else (site if isinstance(site, list) else [])
+                
+                # Filter USGS data
+                usgs_flow_data = get_usgs_data_for_sites(
+                    USGS_df, 
+                    selected_sites, 
+                    USGS_MAPPING,
+                    date_range,
+                    parameter='Flow_cfs'
+                )
+                
+                if not usgs_flow_data.empty:
+                    has_secondary_axis = True
+                    print(f"Adding USGS daily flow: {len(usgs_flow_data)} records")
+                    
+                    # Get list of primary data locations to match colors
+                    if is_usgs_spc:
+                        # If showing USGS SpC as primary, match to those sites
+                        primary_locations = list(usgs_flow_data['Site_Name'].unique())
+                    else:
+                        # Otherwise match to WQX locations
+                        primary_locations = list(data['Location_Name'].unique())
+                    
+                    for idx, usgs_site_name in enumerate(usgs_flow_data['Site_Name'].unique()):
+                        site_flow = usgs_flow_data[usgs_flow_data['Site_Name'] == usgs_site_name]
+                        
+                        # Get the WQX site name for this USGS site
+                        wqx_site_name = None
+                        if USGS_MAPPING is not None:
+                            usgs_site_num = site_flow['Site_Number'].iloc[0]
+                            mapping_match = USGS_MAPPING[USGS_MAPPING['Site_Number'] == usgs_site_num]
+                            if not mapping_match.empty:
+                                wqx_site_name = mapping_match.iloc[0]['WQX_Site_Name']
+                        
+                        # Match color to the WQX site if it exists in primary data
+                        if wqx_site_name and wqx_site_name in primary_locations:
+                            color_idx = primary_locations.index(wqx_site_name)
+                            line_color = primary_colors[color_idx % len(primary_colors)]
+                            print(f"  Matched USGS site '{usgs_site_name}' to WQX site '{wqx_site_name}' - using color {line_color}")
+                        elif usgs_site_name in primary_locations:
+                            # Direct match by site name
+                            color_idx = primary_locations.index(usgs_site_name)
+                            line_color = primary_colors[color_idx % len(primary_colors)]
+                            print(f"  Direct match USGS site '{usgs_site_name}' - using color {line_color}")
+                        else:
+                            # Fallback color if no match
+                            line_color = '#00CED1'
+                            print(f"  No match for USGS site '{usgs_site_name}' - using default color")
+                        
+                        fig.add_trace(go.Scatter(
+                            x=site_flow['Date'],
+                            y=site_flow['Flow_cfs'],
+                            mode='lines',
+                            name=f'{usgs_site_name} (USGS Flow)',
+                            yaxis='y2',
+                            showlegend=True,
+                            line=dict(width=2, color=line_color, dash='dash'),  # ← Using matched color
+                            opacity=0.7,
+                            legendgroup=f'{usgs_site_name}_usgs_flow',
+                            hovertemplate='<b>%{fullData.name}</b><br>' +
+                                        'Date: %{x|%Y-%m-%d}<br>' +
+                                        'Flow: %{y:.2f} cfs<br>' +
+                                        '<extra></extra>'
+                        ))
+            except Exception as e:
+                print(f"Error adding USGS flow data: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Build title
+        title = 'Specific Conductance (USGS Daily) Over Time'
+        if has_secondary_axis:
+            title += ' + Flow'
+        
+        # Layout configuration
+        layout_config = dict(
+            title=title,
+            xaxis_title='Date',
+            hovermode='closest',
+            legend_title_text='Data Source',
+            plot_bgcolor='#2d2d2d',
+            paper_bgcolor='#1e1e1e',
+            font=dict(family="Arial, sans-serif", size=12, color="white"),
+            title_font=dict(family="Arial, sans-serif", size=16, color="white"),
+            xaxis=dict(gridcolor='#404040', zerolinecolor='#404040', color='white', showgrid=True),
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.15,
+                xanchor="center",
+                x=0.5,
+                bgcolor='rgba(45, 45, 45, 0.8)',
+                bordercolor='#555',
+                borderwidth=1,
+                font=dict(color='white', size=10)
+            ),
+            margin=dict(t=50, r=80, b=120, l=80)
+        )
+        
+        # Add y-axis configurations
+        if has_secondary_axis:
+            layout_config['yaxis'] = dict(
+                title=dict(text='Specific Conductance (µS/cm)', font=dict(color='white', size=14)),
+                gridcolor='#404040',
+                zerolinecolor='#404040',
+                color='white',
+                showgrid=True,
+                side='left'
+            )
+            layout_config['yaxis2'] = dict(
+                title=dict(text='Flow (cfs)', font=dict(color='#00CED1', size=14)),
+                overlaying='y',
+                side='right',
+                color='#00CED1',
+                showgrid=False
+            )
+        else:
+            layout_config['yaxis'] = dict(
+                title=dict(text='Specific Conductance (µS/cm)', font=dict(color='white', size=14)),
+                gridcolor='#404040',
+                color='white',
+                showgrid=True
+            )
+        
+        fig.update_layout(**layout_config)
+        return fig
     
     # Convert "All" to None
     if characteristic == "All":
@@ -2969,14 +3468,18 @@ def get_usgs_data_for_sites(usgs_df, wqx_sites, mapping_df, date_range, paramete
      State('site-select', 'value'),
      State('sample-type-select', 'value'),
      State('date-slider', 'value'),
-     State('additional-data-toggle', 'value')],
+     State('additional-data-toggle', 'value'),
+     State('analysis', 'figure')],
     prevent_initial_call=True
 )
-def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, sample_type, date_range, additional_data):
+def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, sample_type, date_range, additional_data, figure):
     """Export the currently displayed time series data to CSV including USGS data"""
-    
+
     if n_clicks == 0:
         return None
+    
+    # Check if USGS daily SpC was selected as the characteristic
+    is_usgs_spc = (characteristic == 'Specific conductance (USGS-daily)')
     
     # Ensure site is always a list or None
     if site == "All" or site == ["All"]:
@@ -2985,40 +3488,143 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
         site = [site]
     
     # Convert other "All" values to None
-    if characteristic == "All":
+    if not is_usgs_spc and characteristic == "All":
         characteristic = None
     if basin == "All":
         basin = None
     if sample_type == "All":
         sample_type = None
     
-    # Get WQX data
-    wqx_data = filter_data(CSU_df, characteristic, fraction, basin, site, sample_type, date_range[0], date_range[1])
-    
     all_export_data = []
     
-    # Add WQX data
-    if wqx_data is not None and not wqx_data.empty:
-        export_columns = [
-            'Location_Name',
-            'Activity_StartDate',
-            'Result_Characteristic',
-            'Result_SampleFraction',
-            'Result_Measure',
-            'Result_MeasureUnit',
-            'Activity_MediaSubdivision',
-            'Location_LatitudeStandardized',
-            'Location_LongitudeStandardized',
-            'Org_Identifier'
-        ]
-        export_columns = [col for col in export_columns if col in wqx_data.columns]
-        
-        wqx_export = wqx_data[export_columns].copy()
-        wqx_export['Data_Source'] = 'WQX'
-        wqx_export = wqx_export.rename(columns={'Activity_StartDate': 'Date'})
-        all_export_data.append(wqx_export)
+    # Extract visible trace names from figure
+    visible_trace_names = set()
+    if figure and 'data' in figure:
+        for trace in figure['data']:
+            # Check if trace is visible (visible property can be True, None, or missing)
+            is_visible = trace.get('visible', True)
+            if is_visible is not False and is_visible != 'legendonly':
+                trace_name = trace.get('name', '')
+                if trace_name:
+                    visible_trace_names.add(trace_name)
     
-    # Add USGS Flow if selected
+    print(f"\n=== EXPORT DEBUG ===")
+    print(f"Characteristic: {characteristic}")
+    print(f"Is USGS SpC: {is_usgs_spc}")
+    print(f"Sites: {site}")
+    print(f"Additional data: {additional_data}")
+    print(f"Visible trace names: {visible_trace_names}")
+    
+    # HANDLE USGS SPECIFIC CONDUCTANCE AS PRIMARY CHARACTERISTIC
+    if is_usgs_spc and HAS_USGS_DATA:
+        try:
+            selected_sites = site if site else []
+            usgs_sc = get_usgs_data_for_sites(
+                USGS_df,
+                selected_sites,
+                USGS_MAPPING,
+                date_range,
+                parameter='SpCond_uScm'
+            )
+            
+            if not usgs_sc.empty:
+                # Filter by visible traces using trace names
+                if visible_trace_names:
+                    # Match site names to visible traces
+                    visible_sites = [s for s in usgs_sc['Site_Name'].unique() if s in visible_trace_names]
+                    if visible_sites:
+                        usgs_sc = usgs_sc[usgs_sc['Site_Name'].isin(visible_sites)]
+                        print(f"Filtered USGS SpC to visible sites: {visible_sites}")
+                    else:
+                        print("Warning: No USGS SpC sites matched visible traces")
+                
+                usgs_sc_export = pd.DataFrame({
+                    'Location_Name': usgs_sc['Site_Name'],
+                    'Date': usgs_sc['Date'],
+                    'Result_Characteristic': 'Specific conductance',
+                    'Result_SampleFraction': '',
+                    'Result_Measure': usgs_sc['SpCond_uScm'],
+                    'Result_MeasureUnit': 'uS/cm',
+                    'Data_Source': 'USGS_Daily'
+                })
+                all_export_data.append(usgs_sc_export)
+                print(f"Added {len(usgs_sc_export)} USGS SpC records")
+        except Exception as e:
+            print(f"Error exporting USGS SpC: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # HANDLE REGULAR WQX DATA
+    else:
+        wqx_data = filter_data(CSU_df, characteristic, fraction, basin, site, sample_type, date_range[0], date_range[1])
+        
+        if wqx_data is not None and not wqx_data.empty:
+            export_columns = [
+                'Location_Name',
+                'Activity_StartDate',
+                'Result_Characteristic',
+                'Result_SampleFraction',
+                'Result_Measure',
+                'Result_MeasureUnit',
+                'Activity_MediaSubdivision',
+                'Location_LatitudeStandardized',
+                'Location_LongitudeStandardized',
+                'Org_Identifier'
+            ]
+            export_columns = [col for col in export_columns if col in wqx_data.columns]
+            
+            wqx_export = wqx_data[export_columns].copy()
+            wqx_export['Data_Source'] = 'WQX'
+            wqx_export = wqx_export.rename(columns={'Activity_StartDate': 'Date'})
+            
+            # Filter by visible traces using location names
+            if visible_trace_names:
+                visible_locations = [loc for loc in wqx_export['Location_Name'].unique() if loc in visible_trace_names]
+                if visible_locations:
+                    wqx_export = wqx_export[wqx_export['Location_Name'].isin(visible_locations)]
+                    print(f"Filtered WQX to visible locations: {visible_locations}")
+                else:
+                    print("Warning: No WQX locations matched visible traces")
+            
+            all_export_data.append(wqx_export)
+            print(f"Added {len(wqx_export)} WQX records")
+    
+    # ADD WQX FLOW if toggled (regardless of primary characteristic)
+    if additional_data and 'wqx_flow' in additional_data:
+        try:
+            flow_data = filter_data(CSU_df, 'Flow', None, basin, site, sample_type, date_range[0], date_range[1])
+            
+            if flow_data is not None and not flow_data.empty:
+                wqx_flow_export = pd.DataFrame({
+                    'Location_Name': flow_data['Location_Name'],
+                    'Date': flow_data['Activity_StartDate'],
+                    'Result_Characteristic': 'Flow',
+                    'Result_SampleFraction': flow_data['Result_SampleFraction'] if 'Result_SampleFraction' in flow_data.columns else '',
+                    'Result_Measure': flow_data['Result_Measure'],
+                    'Result_MeasureUnit': 'cfs',
+                    'Data_Source': 'WQX_Flow'
+                })
+                
+                # Filter by visible traces - match "Location (WQX Flow)" pattern
+                if visible_trace_names:
+                    visible_locations = []
+                    for loc in wqx_flow_export['Location_Name'].unique():
+                        # Check if either the plain name or the "name (WQX Flow)" is visible
+                        if loc in visible_trace_names or f"{loc} (WQX Flow)" in visible_trace_names:
+                            visible_locations.append(loc)
+                    
+                    if visible_locations:
+                        wqx_flow_export = wqx_flow_export[wqx_flow_export['Location_Name'].isin(visible_locations)]
+                        print(f"Filtered WQX Flow to visible locations: {visible_locations}")
+                
+                all_export_data.append(wqx_flow_export)
+                print(f"Added {len(wqx_flow_export)} WQX Flow records")
+        except Exception as e:
+            print(f"Error exporting WQX flow: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # ADD USGS FLOW if toggled
     if additional_data and 'usgs_flow' in additional_data and HAS_USGS_DATA:
         try:
             selected_sites = site if site else []
@@ -3031,6 +3637,18 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
             )
             
             if not usgs_flow.empty:
+                # Filter by visible traces - match "Site Name (USGS Flow)" pattern
+                if visible_trace_names:
+                    visible_sites = []
+                    for site_name in usgs_flow['Site_Name'].unique():
+                        # Check if "name (USGS Flow)" is visible
+                        if f"{site_name} (USGS Flow)" in visible_trace_names:
+                            visible_sites.append(site_name)
+                    
+                    if visible_sites:
+                        usgs_flow = usgs_flow[usgs_flow['Site_Name'].isin(visible_sites)]
+                        print(f"Filtered USGS Flow to visible sites: {visible_sites}")
+                
                 usgs_flow_export = pd.DataFrame({
                     'Location_Name': usgs_flow['Site_Name'],
                     'Date': usgs_flow['Date'],
@@ -3041,34 +3659,11 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
                     'Data_Source': 'USGS_Daily'
                 })
                 all_export_data.append(usgs_flow_export)
+                print(f"Added {len(usgs_flow_export)} USGS Flow records")
         except Exception as e:
             print(f"Error exporting USGS flow: {e}")
-    
-    # Add USGS Specific Conductance if selected
-    if additional_data and 'usgs_sc' in additional_data and HAS_USGS_DATA:
-        try:
-            selected_sites = site if site else []
-            usgs_sc = get_usgs_data_for_sites(
-                USGS_df,
-                selected_sites,
-                USGS_MAPPING,
-                date_range,
-                parameter='SpCond_uScm'
-            )
-            
-            if not usgs_sc.empty:
-                usgs_sc_export = pd.DataFrame({
-                    'Location_Name': usgs_sc['Site_Name'],
-                    'Date': usgs_sc['Date'],
-                    'Result_Characteristic': 'Specific conductance',
-                    'Result_SampleFraction': '',
-                    'Result_Measure': usgs_sc['SpCond_uScm'],
-                    'Result_MeasureUnit': 'uS/cm',
-                    'Data_Source': 'USGS_Daily'
-                })
-                all_export_data.append(usgs_sc_export)
-        except Exception as e:
-            print(f"Error exporting USGS specific conductance: {e}")
+            import traceback
+            traceback.print_exc()
     
     # Combine all data
     if len(all_export_data) == 0:
@@ -3078,9 +3673,16 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
     export_data = pd.concat(all_export_data, ignore_index=True)
     export_data = export_data.sort_values(['Location_Name', 'Date'])
     
+    print(f"\n=== EXPORT SUMMARY ===")
+    print(f"Total records: {len(export_data)}")
+    print(f"Unique locations/sites: {export_data['Location_Name'].nunique()}")
+    print(f"Data sources: {export_data['Data_Source'].unique()}")
+    
     # Create filename
     filename_parts = []
-    if characteristic:
+    if is_usgs_spc:
+        filename_parts.append('USGS_SpC')
+    elif characteristic:
         filename_parts.append(characteristic.replace(' ', '_').replace(',', ''))
     if basin:
         filename_parts.append(basin.replace(' ', '_').replace(',', ''))
@@ -3094,9 +3696,10 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
     
     filename = f"CSU_WaterQuality_{'_'.join(filename_parts)}.csv"
     
-    print(f"Exporting {len(export_data)} records to {filename}")
+    print(f"Exporting to: {filename}")
+    print("=== END EXPORT ===\n")
     
-    return dcc.send_data_frame(export_data.to_csv, filename, index=False)      
+    return dcc.send_data_frame(export_data.to_csv, filename, index=False)   
 
 # SUMMARY TABLE AND DATE RANGE DISPLAY 
 # Date Range Display
@@ -3440,16 +4043,6 @@ def plot_heatmap(characteristic, fraction, basin, site, sample_type, date_range)
     )
 
     return figure
-
-
-    
-
-"""
-- Add dropdown to select for characteristic. Set some thresholds for characteristics and color code based on above/below/near threshold.
-
-- Add summary statistics table on basin and/or site basis. 
-- Add water route?
-"""
 
 if __name__ == "__main__":
     app.run(debug=True)
