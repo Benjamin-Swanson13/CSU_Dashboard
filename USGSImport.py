@@ -98,7 +98,9 @@ def import_arkansas_river_usgs_data():
     usgs_sites = {
         '07094500': 'Arkansas River at Parkdale, CO',
         '07099970': 'Arkansas River at Moffat Street at Pueblo, CO',
+        '07099971': 'Arkansas River Below Moffat Street at Pueblo, CO',
         '07099400': 'Arkansas River above Pueblo, CO',
+        '07099969': 'Arkansas R. at ST Charles Mesa Diver. at Pueblo,co',
         '07109500': 'Arkansas River near Avondale, CO',
         '07124000': 'Arkansas River at Las Animas, CO',
         '07120500': 'Arkansas River near Rocky Ford, CO',
@@ -153,8 +155,10 @@ def import_arkansas_river_usgs_data():
 
     wqx_mapping = {
         '07094500': 'ARKANSAS RIVER AT PARKDALE, CO.',
-        '07099970': 'ARKANSAS RIVER BELOW MOFFAT STREET AT PUEBLO, CO.',
+        '07099970': 'ARKANSAS RIVER AT MOFFAT STREET AT PUEBLO, CO.',
+        '07099971': 'ARKANSAS RIVER BELOW MOFFAT STREET AT PUEBLO, CO',
         '07099400': 'ARKANSAS RIVER ABOVE PUEBLO, CO',
+        '07099969': 'ARKANSAS R. AT ST CHARLES MESA DIVER. AT PUEBLO, CO',
         '07109500': 'ARKANSAS RIVER NEAR AVONDALE, CO.',
         '07124000': 'ARKANSAS RIVER AT LAS ANIMAS, CO.',
         '07120500': 'ARKANSAS RIVER NEAR ROCKY FORD, CO.',

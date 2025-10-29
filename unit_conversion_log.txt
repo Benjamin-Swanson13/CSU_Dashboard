@@ -1,9 +1,9 @@
 Water Quality Unit Conversion Log
 ========================================
 
-pH: 230 records standardized to 'std units'
-Flow: 79 records renamed ft3/s -> cfs
-Flow: 90 records converted from m3/sec to cfs
+pH: 714 records standardized to 'std units'
+Flow: 275 records renamed ft3/s -> cfs
+Flow: 293 records converted from m3/sec to cfs
 
 
 Preserved Units (Different Analytical Methods):

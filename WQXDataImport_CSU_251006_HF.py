@@ -336,10 +336,13 @@ def WQXDataImport():
 
     # Define the criteria mapping
     criteria_mapping = {
-        ("Selenium", "Dissolved"): {"Acute": 18.5, "Chronic": 4.6},
-        ("Iron", "Total"): {"Acute": "", "Chronic": 1000},
-        ("Arsenic", "Dissolved"): {"Acute": 340, "Chronic": ""},
-        ("Arsenic", "Total"): {"Acute": "", "Chronic": 7.6}
+        ("Selenium", "Filtered field and/or lab"): {"Acute": 18.5, "Chronic": 4.6},
+        ("Iron", "Unfiltered"): {"Acute": "", "Chronic": 1000},
+        ("Arsenic", "Filtered field and/or lab"): {"Acute": 340, "Chronic": ""},
+        ("Arsenic", "Unfiltered"): {"Acute": "", "Chronic": 0.02},
+        ("Escherichia coli", ""): {"Acute": "", "Chronic": 126},
+        ("Manganese", "Filtered field and/or lab"): {"Acute": "", "Chronic": 50},
+        ("Uranium", "Filtered field and/or lab"): {"Acute": "", "Chronic": 16.8}
     }
 
     # Apply the criteria mapping
@@ -349,6 +352,14 @@ def WQXDataImport():
             filtered_df.loc[mask, "Acute"] = values["Acute"]
         if values["Chronic"] != "":
             filtered_df.loc[mask, "Chronic"] = values["Chronic"]
+
+    # Calculate hardness-dependent criteria for Manganese
+    #manganese_mask = (filtered_df["Result_Characteristic"] == "Manganese") & (filtered_df["Result_SampleFraction"] == "Filtered")
+    #if manganese_mask.any():
+        # Assuming you have a hardness column - adjust the column name as needed
+    #    hardness = filtered_df.loc[manganese_mask, "Hardness"]  # Change "Hardness" to your actual column name
+    #    filtered_df.loc[manganese_mask, "Acute"] = np.exp(0.3331 * np.log(hardness) + 6.4676)
+    #    filtered_df.loc[manganese_mask, "Chronic"] = np.exp(0.3331 * np.log(hardness) + 5.8743)
 
     # Filter by key analytes - using case-insensitive matching
     print("Filtering by key analytes...")

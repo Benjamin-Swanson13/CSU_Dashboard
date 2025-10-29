@@ -26,6 +26,7 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 import numpy as np
 import glob
+import fiona
 
 # Try to find USGS files
 usgs_files = glob.glob("USGS_DailyData_Arkansas_*.csv")
@@ -629,6 +630,159 @@ except Exception as e:
     USGS_MAPPING = None
     print(f"⚠ Error loading USGS data: {e}")
 
+# Load Stream Miles mapping
+try:
+    stream_miles_df = pd.read_csv('StreamMiles.csv')
+    print(f"✓ Loaded {len(stream_miles_df)} stream mile records")
+    print(f"  Columns: {stream_miles_df.columns.tolist()}")
+    
+    # Create a dictionary for quick lookups - direct mapping, no translation
+    stream_miles_dict = dict(zip(stream_miles_df['Name'], stream_miles_df['Stream Mile']))
+    
+    print(f"  Created lookup for {len(stream_miles_dict)} sites")
+    print(f"  Sample mappings:")
+    for name, mile in list(stream_miles_dict.items())[:5]:
+        print(f"    '{name}' → {mile}")
+    
+except FileNotFoundError:
+    stream_miles_df = None
+    stream_miles_dict = {}
+    print("⚠ StreamMiles.csv not found")
+except Exception as e:
+    stream_miles_df = None
+    stream_miles_dict = {}
+    print(f"⚠ Error loading StreamMiles.csv: {e}")
+
+# Load CDHPE stream segmentation 
+try:
+    print("\n" + "="*80)
+    print("LOADING STREAM SEGMENTATION FROM GDB")
+    print("="*80)
+    
+    import fiona
+    gdb_path = 'segmentation_2024.gdb'
+    
+    print(f"Looking for GDB at: {gdb_path}")
+    
+    # List available layers
+    layers = fiona.listlayers(gdb_path)
+    print(f"✓ Found {len(layers)} layers in GDB:")
+    for layer in layers:
+        print(f"  - {layer}")
+    
+    # Load the StreamsHammer2024 layer
+    layer_name = 'StreamsHammer2024'
+    print(f"\nLoading layer: {layer_name}")
+    
+    stream_segments_gdf = gpd.read_file(gdb_path, layer=layer_name)
+    
+    print(f"✓ Loaded {len(stream_segments_gdf)} stream segments")
+    print(f"  Original CRS: {stream_segments_gdf.crs}")
+    print(f"  Geometry types: {stream_segments_gdf.geometry.geom_type.unique()}")
+    
+    # Reproject to WGS84
+    stream_segments_gdf = stream_segments_gdf.to_crs('EPSG:4326')
+    print(f"  Reprojected to: {stream_segments_gdf.crs}")
+    
+    # Check the Cat (Category) column
+    if 'Cat' in stream_segments_gdf.columns:
+        print(f"\n  Water Quality Categories found:")
+        cat_counts = stream_segments_gdf['Cat'].value_counts()
+        for cat, count in cat_counts.items():
+            print(f"    Category {cat}: {count} segments")
+    
+    print("="*80 + "\n")
+    
+except FileNotFoundError as e:
+    stream_segments_gdf = None
+    print("="*80)
+    print(f"❌ ERROR: File not found - {e}")
+    print("="*80 + "\n")
+except Exception as e:
+    stream_segments_gdf = None
+    print("="*80)
+    print(f"❌ ERROR loading stream segments: {e}")
+    import traceback
+    traceback.print_exc()
+    print("="*80 + "\n")
+
+# Load lakes from CDPHE stream segmentation
+try:
+    print("\n" + "="*80)
+    print("LOADING LAKES FROM GDB")
+    print("="*80)
+    
+    gdb_path = 'segmentation_2024.gdb'
+    layer_name = 'Lakes2024Hammer'
+    
+    print(f"Loading layer: {layer_name}")
+    
+    lakes_gdf = gpd.read_file(gdb_path, layer=layer_name)
+    
+    print(f"✓ Loaded {len(lakes_gdf)} lake features")
+    print(f"  Original CRS: {lakes_gdf.crs}")
+    print(f"  Geometry types: {lakes_gdf.geometry.geom_type.unique()}")
+    
+    # Reproject to WGS84
+    lakes_gdf = lakes_gdf.to_crs('EPSG:4326')
+    print(f"  Reprojected to: {lakes_gdf.crs}")
+    
+    print("="*80 + "\n")
+    
+except Exception as e:
+    lakes_gdf = None
+    print("="*80)
+    print(f"❌ ERROR loading lakes: {e}")
+    import traceback
+    traceback.print_exc()
+    print("="*80 + "\n")
+
+# 303(d) Assessment Category Mapping
+#ASSESSMENT_CATEGORIES = {
+#    '1': {'name': 'Attaining (no TMDL needed)', 'color': '#2E7D32'},  # Dark Green
+#    '1a': {'name': 'Attaining - All Uses', 'color': '#43A047'},  # Green
+#    '1b': {'name': 'Attaining - TMDL Approved', 'color': '#66BB6A'},  # Light Green
+#    '2': {'name': 'Attaining - All Assessed', 'color': '#81C784'},  # Lighter Green
+#    '3': {'name': 'Insufficient Data', 'color': '#9E9E9E'},  # Gray
+#    '3a': {'name': 'No Data Available', 'color': '#BDBDBD'},  # Light Gray
+#    '3b': {'name': 'M&E List', 'color': '#757575'},  # Medium Gray
+#    '4': {'name': 'TMDL Required', 'color': '#F57C00'},  # Orange
+#    '4a': {'name': 'TMDL Approved', 'color': '#FB8C00'},  # Light Orange
+#    '4b': {'name': 'TMDL in Progress', 'color': '#FF9800'},  # Lighter Orange
+#    '4c': {'name': 'TMDL Not Required', 'color': '#FFB74D'},  # Pale Orange
+#   '5': {'name': '303(d) Listed - Impaired', 'color': '#D32F2F'},  # Red
+#    '5a': {'name': '303(d) - High Priority', 'color': '#C62828'},  # Dark Red
+#    'NA': {'name': 'Not Assessed', 'color': '#EEEEEE'},  # Very Light Gray
+#    'Other': {'name': 'Other Status', 'color': '#9C27B0'}  # Purple
+#}
+
+ASSESSMENT_CATEGORIES = {
+    # Attaining Categories (Green shades)
+    '1': {'name': 'Attaining (no TMDL needed)', 'color': '#2E7D32'},  # Dark Green
+    '1a': {'name': 'All attaining', 'color': '#43A047'},  # Green - LAKES
+    '1b': {'name': 'Attaining - TMDL Approved', 'color': '#66BB6A'},  # Light Green - STREAMS
+    '2': {'name': 'Everything assessed was attaining', 'color': '#81C784'},  # Lighter Green - LAKES
+    
+    # Insufficient Data Categories (Gray shades)
+    '3': {'name': 'Insufficient Data', 'color': '#9E9E9E'},  # Gray
+    '3a': {'name': 'Not enough information to assess', 'color': '#BDBDBD'},  # Light Gray - LAKES
+    '3b': {'name': 'M&E List', 'color': '#757575'},  # Medium Gray - LAKES
+    
+    # TMDL Categories (Orange shades)
+    '4': {'name': 'TMDL Required', 'color': '#F57C00'},  # Orange
+    '4a': {'name': 'TMDL', 'color': '#FB8C00'},  # Light Orange - LAKES
+    '4b': {'name': 'TMDL in Progress', 'color': '#FF9800'},  # Lighter Orange - STREAMS
+    '4c': {'name': 'TMDL Not Required', 'color': '#FFB74D'},  # Pale Orange - STREAMS
+    
+    # Impaired Categories (Red shades)
+    '5': {'name': '303(d)', 'color': '#D32F2F'},  # Red - LAKES
+    '5a': {'name': '303(d) - High Priority', 'color': '#C62828'},  # Dark Red - STREAMS
+    
+    # Other/Unknown
+    'NA': {'name': 'Not Assessed', 'color': '#EEEEEE'},  # Very Light Gray
+    'Other': {'name': 'Other Status', 'color': '#9C27B0'}  # Purple
+}
+
 # Date range slider limits
 min_year = CSU_df['Activity_StartDate'].min().year
 max_year = CSU_df['Activity_StartDate'].max().year
@@ -1100,8 +1254,22 @@ app.layout = html.Div(
                             }
                         )
                     ], style={'margin-bottom': '15px', 'display': 'flex', 'alignItems': 'center'}),
-            
-                    
+
+                    # CDPHE Stream Segmentation
+                    html.Div([
+                        html.Label('Additional Layers:', 
+                                style={'color': '#ffffff', 'font-weight': 'bold', 'margin-bottom': '8px', 'display': 'block'}),
+                        dcc.Checklist(
+                            id='additional-layers-toggle',
+                            options=[
+                                {'label': ' Stream Segmentation (by category)', 'value': 'segments'},
+                                {'label': ' Lakes & Reservoirs', 'value': 'lakes'}
+                            ],
+                            value=[],
+                            style={'color': '#ffffff'},
+                            labelStyle={'display': 'block', 'margin-bottom': '5px'}
+                        )
+                    ], style={'margin-bottom': '15px'}),
                     dcc.Graph(
                         id="basin-map",
                         figure=dict(
@@ -2138,11 +2306,12 @@ def update_exchange_dropdown(basin):
      Input('canal-select', 'value'),
      Input('exchange-select', 'value'),
      Input('rivers-toggle', 'value'),
+     Input('additional-layers-toggle', 'value'),
      Input('sample-type-select', 'value'),
      Input('date-slider', 'value')
     ]
 )
-def highlight_basin(characteristic, fraction, basin, site, selected_canals, selected_exchange, rivers_toggle, sample_type, date_range):
+def highlight_basin(characteristic, fraction, basin, site, selected_canals, selected_exchange, rivers_toggle, additional_layers, sample_type, date_range):
     print(f"Debug: Selected basin = {basin}")
     print(f"Debug: Selected canals = {selected_canals}")
 
@@ -2706,6 +2875,223 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             print("Debug: streams_gdf is None - shapefile not loaded")
         elif not rivers_toggle or len(rivers_toggle) == 0:
             print(f"Debug: Rivers toggle is empty (value: {rivers_toggle})")
+
+      # Add stream segments if selected
+    if additional_layers and 'segments' in additional_layers and stream_segments_gdf is not None:
+        try:
+            print(f"\n=== ADDING STREAM SEGMENTS TO MAP ===")
+            
+            # Filter to HUC8 basins
+            segments_projected = stream_segments_gdf.to_crs('EPSG:26913')
+            basins_projected = BASINS_GDF.to_crs('EPSG:26913')
+            
+            huc8_union = basins_projected.geometry.union_all()
+            huc8_buffered = huc8_union.buffer(1000)
+            
+            segments_in_huc8 = segments_projected[segments_projected.geometry.intersects(huc8_buffered)]
+            print(f"Filtered to {len(segments_in_huc8)} segments in study area")
+            
+            # Convert back to WGS84
+            segments_to_show = segments_in_huc8.to_crs('EPSG:4326')
+            
+            # Group by category and create separate traces for each
+            # Convert Cat to string and fill NaN with 'NA'
+            segments_to_show['Cat'] = segments_to_show['Cat'].fillna('NA').astype(str)
+            categories = sorted(segments_to_show['Cat'].unique())
+            print(f"Found categories: {categories}")
+            
+            # Define display order (most impaired first for legend visibility)
+            category_order = ['5', '5a', '4', '4a', '4b', '4c', '3', '3a', '3b', '2', '1', '1a', '1b', 'NA', 'Other']
+            
+            # Sort categories by priority order
+            def get_priority(cat):
+                try:
+                    return category_order.index(str(cat))
+                except ValueError:
+                    return len(category_order)
+            
+            categories_sorted = sorted(categories, key=get_priority)
+            
+            for cat in categories_sorted:
+                cat_segments = segments_to_show[segments_to_show['Cat'] == cat]
+                
+                if len(cat_segments) == 0:
+                    continue
+                
+                # Get color and name for this category
+                cat_info = ASSESSMENT_CATEGORIES.get(cat, ASSESSMENT_CATEGORIES['Other'])
+                color = cat_info['color']
+                cat_name = cat_info['name']
+                
+                # Combine all segments of this category into one trace
+                all_lons = []
+                all_lats = []
+                
+                for idx, row in cat_segments.iterrows():
+                    geom = row.geometry
+                    
+                    if geom is None:
+                        continue
+                    
+                    try:
+                        if geom.geom_type == 'LineString':
+                            lons, lats = geom.xy
+                            all_lons.extend(list(lons))
+                            all_lats.extend(list(lats))
+                            all_lons.append(None)
+                            all_lats.append(None)
+                        elif geom.geom_type == 'MultiLineString':
+                            for line in geom.geoms:
+                                lons, lats = line.xy
+                                all_lons.extend(list(lons))
+                                all_lats.extend(list(lats))
+                                all_lons.append(None)
+                                all_lats.append(None)
+                    except Exception as e:
+                        print(f"  Warning: Error processing segment geometry: {e}")
+                        continue
+                
+                if not all_lons or not all_lats:
+                    continue
+                
+                # Add one trace per category with enhanced styling
+                segment_trace = dict(
+                    lat=all_lats,
+                    lon=all_lons,
+                    type='scattermapbox',
+                    mode='lines',
+                    line=dict(
+                        width=4,  # Thicker lines for better visibility
+                        color=color
+                    ),
+                    opacity=0.85,  # Slight transparency
+                    hovertemplate=f'<b>303(d) Category {cat}</b><br>{cat_name}<br>({len(cat_segments)} segments)<extra></extra>',
+                    name=f'Cat {cat}: {cat_name}',
+                    showlegend=True,
+                    legendgroup='stream_segments',
+                    legendgrouptitle=dict(text='303(d) Stream Assessments', font=dict(size=12, color='white', family='Arial'))
+                )
+                data.append(segment_trace)
+                
+                print(f"  ✓ Cat {cat}: {len(cat_segments)} segments - {cat_name} - Color: {color}")
+            
+            print(f"✓ Added {len(categories_sorted)} assessment categories to map")
+            print(f"=== STREAM SEGMENTS COMPLETE ===\n")
+            
+        except Exception as e:
+            print(f"❌ ERROR adding stream segments: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # Add lakes if selected
+    if additional_layers and 'lakes' in additional_layers and lakes_gdf is not None:
+        try:
+            print(f"\n=== ADDING LAKES TO MAP ===")
+            
+            # Filter to HUC8 basins
+            lakes_projected = lakes_gdf.to_crs('EPSG:26913')
+            basins_projected = BASINS_GDF.to_crs('EPSG:26913')
+            
+            huc8_union = basins_projected.geometry.union_all()
+            huc8_buffered = huc8_union.buffer(1000)
+            
+            lakes_in_huc8 = lakes_projected[lakes_projected.geometry.intersects(huc8_buffered)]
+            print(f"Filtered to {len(lakes_in_huc8)} lakes in study area")
+            
+            # Convert back to WGS84
+            lakes_to_show = lakes_in_huc8.to_crs('EPSG:4326')
+            
+            # Convert Cat to string and fill NaN with 'Other'
+            lakes_to_show['Cat'] = lakes_to_show['Cat'].fillna('Other').astype(str)
+            categories = sorted(lakes_to_show['Cat'].unique())
+            print(f"Found lake categories: {categories}")
+            
+            # Define display order (most impaired first)
+            category_order = ['5', '4a', '3b', '3a', '2', '1a', 'Other']
+            
+            # Sort categories by priority order
+            def get_priority(cat):
+                try:
+                    return category_order.index(str(cat))
+                except ValueError:
+                    return len(category_order)
+            
+            categories_sorted = sorted(categories, key=get_priority)
+            
+            for cat in categories_sorted:
+                cat_lakes = lakes_to_show[lakes_to_show['Cat'] == cat]
+                
+                if len(cat_lakes) == 0:
+                    continue
+                
+                # Get color and name for this category
+                cat_info = ASSESSMENT_CATEGORIES.get(cat, ASSESSMENT_CATEGORIES['Other'])
+                color = cat_info['color']
+                cat_name = cat_info['name']
+                
+                # Combine all lake polygons for this category
+                all_lons = []
+                all_lats = []
+                
+                for idx, row in cat_lakes.iterrows():
+                    geom = row.geometry
+                    
+                    if geom is None:
+                        continue
+                    
+                    try:
+                        if geom.geom_type == 'Polygon':
+                            lons, lats = geom.exterior.xy
+                            all_lons.extend(list(lons))
+                            all_lats.extend(list(lats))
+                            all_lons.append(None)
+                            all_lats.append(None)
+                        elif geom.geom_type == 'MultiPolygon':
+                            for poly in geom.geoms:
+                                lons, lats = poly.exterior.xy
+                                all_lons.extend(list(lons))
+                                all_lats.extend(list(lats))
+                                all_lons.append(None)
+                                all_lats.append(None)
+                    except Exception as e:
+                        print(f"  Warning: Error processing lake geometry: {e}")
+                        continue
+                
+                if not all_lons or not all_lats:
+                    continue
+                
+                # Create rgba color with transparency for fill
+                # Convert hex to rgb
+                hex_color = color.lstrip('#')
+                r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                fill_color = f'rgba({r}, {g}, {b}, 0.4)'  # 40% opacity for fill
+                
+                # Add trace for this category
+                lake_trace = dict(
+                    lat=all_lats,
+                    lon=all_lons,
+                    type='scattermapbox',
+                    mode='lines',
+                    fill='toself',
+                    fillcolor=fill_color,
+                    line=dict(width=2, color=color),  # Solid border
+                    hovertemplate=f'<b>Lake/Reservoir - Cat {cat}</b><br>{cat_name}<br>({len(cat_lakes)} waterbodies)<extra></extra>',
+                    name=f'Cat {cat}: {cat_name}',
+                    showlegend=True,
+                    legendgroup='lakes',
+                    legendgrouptitle=dict(text='Lakes/Reservoirs [2026 Provisional]', font=dict(size=12, color='white', family='Arial'))
+                )
+                data.append(lake_trace)
+                
+                print(f"  ✓ Cat {cat}: {len(cat_lakes)} lakes - {cat_name} - Color: {color}")
+            
+            print(f"✓ Added {len(categories_sorted)} lake categories to map")
+            print(f"=== LAKES COMPLETE ===\n")
+            
+        except Exception as e:
+            print(f"❌ ERROR adding lakes: {e}")
+            import traceback
+            traceback.print_exc()
 
     # Update layout with the highlighted basin 
     layout = dict(
@@ -3341,7 +3727,7 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
             itemdoubleclick='toggleothers',
             tracegroupgap=5  # Space between legend groups
         ),
-        margin=dict(t=50, r=80, b=120, l=80)  # ← MORE BOTTOM MARGIN for legend
+        margin=dict(t=50, r=80, b=120, l=80)  
     )
 
     # Add y-axis configurations
@@ -3388,6 +3774,53 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
             showticklabels=True,
             tickfont=dict(color='white', size=12)
         )
+
+    # Get acute and chronic values for the selected characteristic
+    acute_values = data[(data['Acute'] != '') & (data['Acute'].notna())]['Acute'].dropna()
+    chronic_values = data[(data['Chronic'] != '') & (data['Chronic'].notna())]['Chronic'].dropna()
+
+    # Add horizontal lines for acute and chronic levels if they exist
+    if not acute_values.empty:
+        try:
+            acute_level = float(acute_values.iloc[0])
+            fig.add_hline(
+                y=acute_level, 
+                line_dash="dash", 
+                line_color="red",
+                annotation_text=f"Acute: {acute_level:.2f}",
+                annotation_position="right"
+            )
+            # Add invisible scatter point to create legend entry
+            fig.add_scatter(
+                x=[None], y=[None],
+                mode='lines',
+                line=dict(color='red', dash='dash'),
+                name=f'CDPHE Acute Standard ({acute_level:.2f})',
+                showlegend=True
+            )
+        except (ValueError, TypeError):
+            print(f"Warning: Could not convert acute value to float")
+
+    if not chronic_values.empty:
+        try:
+            chronic_level = float(chronic_values.iloc[0])
+            fig.add_hline(
+                y=chronic_level, 
+                line_dash="dash", 
+                line_color="orange",
+                annotation_text=f"Chronic: {chronic_level:.2f}",
+                annotation_position="right"
+            )
+            # Add invisible scatter point to create legend entry
+            fig.add_scatter(
+                x=[None], y=[None],
+                mode='lines',
+                line=dict(color='orange', dash='dash'),
+                name=f'CDPHE Chronic Standard ({chronic_level:.2f})',
+                showlegend=True
+            )
+        except (ValueError, TypeError):
+            print(f"Warning: Could not convert chronic value to float")
 
     # Apply layout
     fig.update_layout(**layout_config)
@@ -3508,13 +3941,6 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
                 if trace_name:
                     visible_trace_names.add(trace_name)
     
-    print(f"\n=== EXPORT DEBUG ===")
-    print(f"Characteristic: {characteristic}")
-    print(f"Is USGS SpC: {is_usgs_spc}")
-    print(f"Sites: {site}")
-    print(f"Additional data: {additional_data}")
-    print(f"Visible trace names: {visible_trace_names}")
-    
     # HANDLE USGS SPECIFIC CONDUCTANCE AS PRIMARY CHARACTERISTIC
     if is_usgs_spc and HAS_USGS_DATA:
         try:
@@ -3534,12 +3960,13 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
                     visible_sites = [s for s in usgs_sc['Site_Name'].unique() if s in visible_trace_names]
                     if visible_sites:
                         usgs_sc = usgs_sc[usgs_sc['Site_Name'].isin(visible_sites)]
-                        print(f"Filtered USGS SpC to visible sites: {visible_sites}")
-                    else:
-                        print("Warning: No USGS SpC sites matched visible traces")
+                
+                # ADD STREAM MILE
+                usgs_sc['Stream_Mile'] = usgs_sc['Site_Name'].map(stream_miles_dict)
                 
                 usgs_sc_export = pd.DataFrame({
                     'Location_Name': usgs_sc['Site_Name'],
+                    'Stream_Mile': usgs_sc['Stream_Mile'],  
                     'Date': usgs_sc['Date'],
                     'Result_Characteristic': 'Specific conductance',
                     'Result_SampleFraction': '',
@@ -3551,8 +3978,6 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
                 print(f"Added {len(usgs_sc_export)} USGS SpC records")
         except Exception as e:
             print(f"Error exporting USGS SpC: {e}")
-            import traceback
-            traceback.print_exc()
     
     # HANDLE REGULAR WQX DATA
     else:
@@ -3574,20 +3999,25 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
             export_columns = [col for col in export_columns if col in wqx_data.columns]
             
             wqx_export = wqx_data[export_columns].copy()
+            wqx_export['Stream_Mile'] = wqx_export['Location_Name'].map(stream_miles_dict)
             wqx_export['Data_Source'] = 'WQX'
             wqx_export = wqx_export.rename(columns={'Activity_StartDate': 'Date'})
             
+            # Reorder columns to put Stream_Mile after Location_Name
+            cols = wqx_export.columns.tolist()
+            if 'Stream_Mile' in cols:
+                cols.remove('Stream_Mile')
+                loc_idx = cols.index('Location_Name')
+                cols.insert(loc_idx + 1, 'Stream_Mile')
+                wqx_export = wqx_export[cols]
+
             # Filter by visible traces using location names
             if visible_trace_names:
                 visible_locations = [loc for loc in wqx_export['Location_Name'].unique() if loc in visible_trace_names]
                 if visible_locations:
                     wqx_export = wqx_export[wqx_export['Location_Name'].isin(visible_locations)]
-                    print(f"Filtered WQX to visible locations: {visible_locations}")
-                else:
-                    print("Warning: No WQX locations matched visible traces")
             
             all_export_data.append(wqx_export)
-            print(f"Added {len(wqx_export)} WQX records")
     
     # ADD WQX FLOW if toggled (regardless of primary characteristic)
     if additional_data and 'wqx_flow' in additional_data:
@@ -3595,8 +4025,11 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
             flow_data = filter_data(CSU_df, 'Flow', None, basin, site, sample_type, date_range[0], date_range[1])
             
             if flow_data is not None and not flow_data.empty:
+                flow_data['Stream_Mile'] = flow_data['Location_Name'].map(stream_miles_dict)
+                
                 wqx_flow_export = pd.DataFrame({
                     'Location_Name': flow_data['Location_Name'],
+                    'Stream_Mile': flow_data['Stream_Mile'],
                     'Date': flow_data['Activity_StartDate'],
                     'Result_Characteristic': 'Flow',
                     'Result_SampleFraction': flow_data['Result_SampleFraction'] if 'Result_SampleFraction' in flow_data.columns else '',
@@ -3649,8 +4082,11 @@ def export_timeseries_data(n_clicks, characteristic, fraction, basin, site, samp
                         usgs_flow = usgs_flow[usgs_flow['Site_Name'].isin(visible_sites)]
                         print(f"Filtered USGS Flow to visible sites: {visible_sites}")
                 
+                usgs_flow['Stream_Mile'] = usgs_flow['Site_Name'].map(stream_miles_dict)
+                
                 usgs_flow_export = pd.DataFrame({
                     'Location_Name': usgs_flow['Site_Name'],
+                    'Stream_Mile': usgs_flow['Stream_Mile'],
                     'Date': usgs_flow['Date'],
                     'Result_Characteristic': 'Flow',
                     'Result_SampleFraction': '',
