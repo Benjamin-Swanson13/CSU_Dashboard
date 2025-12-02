@@ -594,6 +594,30 @@ CSU_df = pd.read_csv(parsed_csv, dtype=str)
 CSU_df['Activity_StartDate'] = pd.to_datetime(CSU_df['Activity_StartDate'], errors='coerce')
 CSU_df['Result_Measure'] = pd.to_numeric(CSU_df['Result_Measure'], errors='coerce')
 
+# ADD MANUAL COORDINATE FOR "AT MOFFAT" SITE
+# This site has USGS data but no WQX data, so we add a dummy entry to give it coordinates
+if 'ARKANSAS RIVER AT MOFFAT STREET AT PUEBLO, CO' not in CSU_df['Location_Name'].values:
+    # Create a single dummy row with just the essential info
+    dummy_row = pd.DataFrame({
+        'Location_Name': ['ARKANSAS RIVER AT MOFFAT STREET AT PUEBLO, CO'],
+        'Location_LatitudeStandardized': [38.2536139630922],
+        'Location_LongitudeStandardized': [-104.606085372154],
+        'Activity_StartDate': [pd.NaT],
+        'Result_Measure': [np.nan],
+        'Result_Characteristic': [''],
+        'Result_SampleFraction': [''],
+        'Result_MeasureUnit': [''],
+        'Org_Identifier': ['USGS']
+    })
+    
+    # Add any other columns that exist in CSU_df with default values
+    for col in CSU_df.columns:
+        if col not in dummy_row.columns:
+            dummy_row[col] = ''
+    
+    # Append to CSU_df
+    CSU_df = pd.concat([CSU_df, dummy_row], ignore_index=True)
+
 # Load USGS daily data (flow + specific conductance)
 print("Loading USGS daily data...")
 try:
@@ -616,6 +640,36 @@ try:
         try:
             USGS_MAPPING = pd.read_csv(mapping_file)
             print(f"✓ Loaded site mapping with {len(USGS_MAPPING)} sites")
+
+            #Add coordinates to USGS_MAPPING if not already present ***
+            if 'Latitude' not in USGS_MAPPING.columns or 'Longitude' not in USGS_MAPPING.columns:
+                print("Adding coordinates to USGS site mapping...")
+                
+                # Merge coordinates from CSU_df where WQX site names match
+                coord_mapping = CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates()
+                coord_mapping = coord_mapping.rename(columns={'Location_Name': 'WQX_Site_Name'})
+                
+                USGS_MAPPING = USGS_MAPPING.merge(
+                    coord_mapping, 
+                    on='WQX_Site_Name', 
+                    how='left'
+                )
+                USGS_MAPPING = USGS_MAPPING.rename(columns={
+                    'Location_LatitudeStandardized': 'Latitude',
+                    'Location_LongitudeStandardized': 'Longitude'
+                })
+                
+                print(f"  Sites with coordinates: {USGS_MAPPING['Latitude'].notna().sum()}/{len(USGS_MAPPING)}")
+            
+            # Merge coordinates back into USGS_df ***
+            USGS_df = USGS_df.merge(
+                USGS_MAPPING[['Site_Number', 'Latitude', 'Longitude']],
+                on='Site_Number',
+                how='left'
+            )
+            
+            print(f"  USGS_df now has coordinates for {USGS_df['Latitude'].notna().sum()} records")
+            
         except FileNotFoundError:
             USGS_MAPPING = None
             print("⚠ No site mapping file found")
@@ -629,6 +683,26 @@ except Exception as e:
     USGS_df = pd.DataFrame()
     USGS_MAPPING = None
     print(f"⚠ Error loading USGS data: {e}")
+
+# Create unified site list from both WQX and USGS data
+print("\nCreating unified site list...")
+wqx_sites = set(CSU_df['Location_Name'].dropna().unique())
+usgs_sites = set(USGS_df['Site_Name'].dropna().unique()) if HAS_USGS_DATA else set()
+
+ALL_SITES = sorted(list(wqx_sites | usgs_sites))  # Union of both sets
+
+print(f"  WQX sites: {len(wqx_sites)}")
+print(f"  USGS sites: {len(usgs_sites)}")
+print(f"  Shared sites: {len(wqx_sites & usgs_sites)}")
+print(f"  USGS-only sites: {len(usgs_sites - wqx_sites)}")
+print(f"  Total unique sites: {len(ALL_SITES)}")
+
+# Show USGS-only sites (like the Moffat site)
+usgs_only = usgs_sites - wqx_sites
+if usgs_only:
+    print(f"\n  USGS-only sites that will now appear:")
+    for site in sorted(usgs_only):
+        print(f"    - {site}")
 
 # Load Stream Miles mapping
 try:
@@ -1641,25 +1715,31 @@ def update_site_options(basin):
     
     # If "All" basins selected, show all sites
     if basin is None or basin == "All":
-        available_sites = sorted(CSU_df['Location_Name'].dropna().unique())
+        # Get sites from both WQX and USGS data
+        wqx_sites = set(CSU_df['Location_Name'].dropna().unique())
+        usgs_sites = set(USGS_df['Site_Name'].dropna().unique()) if HAS_USGS_DATA else set()
+        
+        # Combine both sets
+        available_sites = sorted(list(wqx_sites | usgs_sites))
+        
         options = [{'label': 'All', 'value': 'All'}] + [{'label': site, 'value': site} for site in available_sites]
         return options, ['']  # Return list for multi-select
     
     # Filter sites by basin using spatial join
     try:
-        # Get all unique sites with coordinates
-        sites_df = CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates()
-        sites_df = sites_df.dropna()
+        # Get all unique sites with coordinates from WQX
+        wqx_sites_df = CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates()
+        wqx_sites_df = wqx_sites_df.dropna()
         
         # Convert to numeric
-        sites_df['Location_LatitudeStandardized'] = pd.to_numeric(sites_df['Location_LatitudeStandardized'], errors='coerce')
-        sites_df['Location_LongitudeStandardized'] = pd.to_numeric(sites_df['Location_LongitudeStandardized'], errors='coerce')
-        sites_df = sites_df.dropna()
+        wqx_sites_df['Location_LatitudeStandardized'] = pd.to_numeric(wqx_sites_df['Location_LatitudeStandardized'], errors='coerce')
+        wqx_sites_df['Location_LongitudeStandardized'] = pd.to_numeric(wqx_sites_df['Location_LongitudeStandardized'], errors='coerce')
+        wqx_sites_df = wqx_sites_df.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized'])
         
         # Create GeoSeries of points
         points = gpd.GeoSeries(gpd.points_from_xy(
-            sites_df['Location_LongitudeStandardized'], 
-            sites_df['Location_LatitudeStandardized']
+            wqx_sites_df['Location_LongitudeStandardized'], 
+            wqx_sites_df['Location_LatitudeStandardized']
         )).set_crs('EPSG:4326')
         
         # Find the correct basin column name
@@ -1671,52 +1751,52 @@ def update_site_options(basin):
         
         if basin_col is None:
             print("ERROR: No basin column found")
-            available_sites = sorted(CSU_df['Location_Name'].dropna().unique())
+            # Fallback to all sites
+            wqx_sites = set(CSU_df['Location_Name'].dropna().unique())
+            usgs_sites = set(USGS_df['Site_Name'].dropna().unique()) if HAS_USGS_DATA else set()
+            available_sites = sorted(list(wqx_sites | usgs_sites))
             options = [{'label': 'All', 'value': 'All'}] + [{'label': site, 'value': site} for site in available_sites]
-            return options, ['All']
+            return options, ['']
         
         # Get basin geometry
         basin_match = BASINS_GDF[BASINS_GDF[basin_col] == basin]
         if basin_match.empty:
             print(f"ERROR: Basin '{basin}' not found")
-            available_sites = sorted(CSU_df['Location_Name'].dropna().unique())
+            # Fallback to all sites
+            wqx_sites = set(CSU_df['Location_Name'].dropna().unique())
+            usgs_sites = set(USGS_df['Site_Name'].dropna().unique()) if HAS_USGS_DATA else set()
+            available_sites = sorted(list(wqx_sites | usgs_sites))
             options = [{'label': 'All', 'value': 'All'}] + [{'label': site, 'value': site} for site in available_sites]
-            return options, ['All']
+            return options, ['']
         
         basin_geom = basin_match['geometry'].iloc[0]
         
-        # Find sites within basin
-        sites_in_basin = points.within(basin_geom, align=False)
-        sites_in_basin.index = sites_df.index
+        # Find WQX sites within basin
+        wqx_in_basin = points.within(basin_geom, align=False)
+        wqx_in_basin.index = wqx_sites_df.index
+        filtered_wqx_sites = set(wqx_sites_df[wqx_in_basin]['Location_Name'].unique())
         
-        # Get list of site names in basin
-        sites_in_basin_df = sites_df[sites_in_basin]
-        available_sites = sorted(sites_in_basin_df['Location_Name'].unique())
+        # Get USGS-only sites (sites that don't have WQX equivalents)
+        usgs_only_sites = set()
+        if HAS_USGS_DATA and USGS_MAPPING is not None:
+            usgs_only_sites = set(USGS_MAPPING[~USGS_MAPPING['WQX_Site_Name'].isin(CSU_df['Location_Name'])]['WQX_Site_Name'].unique())
         
-        print(f"Found {len(available_sites)} sites in basin '{basin}'")
+        # Combine WQX sites in basin + USGS-only sites (which appear in all basins)
+        basin_sites = sorted(list(filtered_wqx_sites | usgs_only_sites))
         
-        # Create options
-        if len(available_sites) == 0:
-            options = [{'label': 'No sites in selected basin', 'value': 'All'}]
-            return options, ['']
-        else:
-            options = [{'label': 'All', 'value': 'All'}] + [{'label': site, 'value': site} for site in available_sites]
-            return options, ['']
-    
+        options = [{'label': 'All', 'value': 'All'}] + [{'label': site, 'value': site} for site in basin_sites]
+        return options, ['']
+        
     except Exception as e:
-        print(f"ERROR in site filtering: {e}")
+        print(f"Error in basin filtering: {e}")
         import traceback
         traceback.print_exc()
-        
-        available_sites = sorted(CSU_df['Location_Name'].dropna().unique())
+        # Fallback to all sites
+        wqx_sites = set(CSU_df['Location_Name'].dropna().unique())
+        usgs_sites = set(USGS_df['Site_Name'].dropna().unique()) if HAS_USGS_DATA else set()
+        available_sites = sorted(list(wqx_sites | usgs_sites))
         options = [{'label': 'All', 'value': 'All'}] + [{'label': site, 'value': site} for site in available_sites]
-        return options, ['All']
-
-
-# Temporary - just to see what's in the file
-#streams_gdf = gpd.read_file('StreamsRivers.shp')
-#print(streams_gdf.columns.tolist())
-#print(streams_gdf.head())
+        return options, ['']
 
 @app.callback(
     Output('rivers-toggle', 'options'),
@@ -2311,9 +2391,11 @@ def update_exchange_dropdown(basin):
      Input('date-slider', 'value')
     ]
 )
+
 def highlight_basin(characteristic, fraction, basin, site, selected_canals, selected_exchange, rivers_toggle, additional_layers, sample_type, date_range):
     print(f"Debug: Selected basin = {basin}")
     print(f"Debug: Selected canals = {selected_canals}")
+    print(f"Debug: Selected characteristic = {characteristic}")
 
     # Load basin data
     basin_df = gpd.read_file('huc8_boundaries.geojson')
@@ -2327,12 +2409,12 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
     
     if basin_col is None:
         print("Error: No basin name column found in GeoJSON")
-        basin_col = 'ID'  # Fallback to ID if no name column found
+        basin_col = 'ID'
     
     print(f"Debug: Using basin column = {basin_col}")
     print(f"Debug: Available basins = {basin_df[basin_col].unique()}")
     
-    # Get the specific basin geometry using the name
+    # Get the specific basin geometry
     selected_basin_row = basin_df[basin_df[basin_col] == basin]
     
     if selected_basin_row.empty:
@@ -2407,95 +2489,391 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             basin_geom = None
             print("Debug: Using original layers (no highlight)")
 
-    # Filter and process the data
+    # ===================================================================
+    # VARIABLE DEFINITIONS - AVAILABLE EVERYWHERE
+    # ===================================================================
+    is_usgs_spc = (characteristic == 'Specific conductance (USGS-daily)')
+    
+    selected_sites = []
+    if site and site != 'All':
+        if isinstance(site, str):
+            selected_sites = [site]
+        elif isinstance(site, list):
+            selected_sites = [s for s in site if s != 'All']
+    
+    has_usgs_sites = False
+    usgs_site_names = set()
+    if HAS_USGS_DATA and USGS_MAPPING is not None:
+        usgs_site_names = set(USGS_MAPPING['WQX_Site_Name'].tolist())
+        if selected_sites:
+            has_usgs_sites = any(s in usgs_site_names for s in selected_sites)
+
+    # ===================================================================
+    # MAIN MAP DATA LOGIC
+    # ===================================================================
     data = []
+    
     if characteristic and basin:
-        df = filter_data(CSU_df, characteristic, fraction, basin, site, sample_type, date_range[0], date_range[1])
+        # BRANCH 1: USGS SpC characteristic selected
+        if is_usgs_spc and HAS_USGS_DATA:
+            print("Debug: USGS SpC selected - showing USGS sites on map")
+            
+            usgs_sc_data = get_usgs_data_for_sites(
+                USGS_df,
+                selected_sites if selected_sites else [],
+                USGS_MAPPING,
+                date_range,
+                parameter='SpCond_uScm'
+            )
+            
+            if not usgs_sc_data.empty:
+                print(f"Debug: Found {len(usgs_sc_data)} USGS SpC records")
+                
+                # Get coordinates
+                if 'Latitude' in usgs_sc_data.columns and 'Longitude' in usgs_sc_data.columns:
+                    usgs_with_coords = usgs_sc_data.copy()
+                    usgs_with_coords = usgs_with_coords.rename(columns={
+                        'Latitude': 'Location_LatitudeStandardized',
+                        'Longitude': 'Location_LongitudeStandardized'
+                    })
+                else:
+                    if USGS_MAPPING is not None and 'Latitude' in USGS_MAPPING.columns:
+                        usgs_with_coords = usgs_sc_data.merge(
+                            USGS_MAPPING[['Site_Number', 'Latitude', 'Longitude']],
+                            on='Site_Number',
+                            how='left'
+                        )
+                        usgs_with_coords = usgs_with_coords.rename(columns={
+                            'Latitude': 'Location_LatitudeStandardized',
+                            'Longitude': 'Location_LongitudeStandardized'
+                        })
+                    else:
+                        usgs_with_coords = usgs_sc_data.merge(
+                            CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates(),
+                            left_on='Site_Name',
+                            right_on='Location_Name',
+                            how='left'
+                        )
+                
+                # Convert to numeric and remove invalid
+                usgs_with_coords['Location_LatitudeStandardized'] = pd.to_numeric(
+                    usgs_with_coords['Location_LatitudeStandardized'], errors='coerce'
+                )
+                usgs_with_coords['Location_LongitudeStandardized'] = pd.to_numeric(
+                    usgs_with_coords['Location_LongitudeStandardized'], errors='coerce'
+                )
+                usgs_with_coords = usgs_with_coords.dropna(
+                    subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized']
+                )
+                
+                # Aggregate by site
+                usgs_agg = usgs_with_coords.groupby('Site_Name', as_index=False).agg({
+                    'Location_LatitudeStandardized': 'mean',
+                    'Location_LongitudeStandardized': 'mean',
+                    'SpCond_uScm': 'mean'
+                })
+                
+                # Get all WQX sites for grey background
+                all_wqx_sites = CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates()
+                all_wqx_sites['Location_LatitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LatitudeStandardized'], errors='coerce')
+                all_wqx_sites['Location_LongitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LongitudeStandardized'], errors='coerce')
+                all_wqx_sites = all_wqx_sites.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized'])
+                
+                non_selected = all_wqx_sites[~all_wqx_sites['Location_Name'].isin(usgs_agg['Site_Name'].unique())]
+                
+                # Create map data
+                data = [
+                    dict(
+                        lat=non_selected['Location_LatitudeStandardized'].tolist(),
+                        lon=non_selected['Location_LongitudeStandardized'].tolist(),
+                        type='scattermapbox',
+                        hovertext=non_selected['Location_Name'].tolist(),
+                        marker=dict(size=5, color='grey', opacity=0.5),
+                        name='Other Stations',
+                        showlegend=False
+                    ),
+                    dict(
+                        lat=usgs_agg['Location_LatitudeStandardized'].tolist(),
+                        lon=usgs_agg['Location_LongitudeStandardized'].tolist(),
+                        type='scattermapbox',
+                        hovertext=[f"{name}<br>USGS SpC: {val:.0f} µS/cm" for name, val in
+                                zip(usgs_agg['Site_Name'], usgs_agg['SpCond_uScm'])],
+                        marker=dict(size=15, color='#00CED1', opacity=1),
+                        name='USGS Specific Conductance',
+                        showlegend=True
+                    ),
+                    dict(
+                        lat=huc_centroids['lat'].tolist(),
+                        lon=huc_centroids['lon'].tolist(),
+                        type='scattermapbox',
+                        hovertext=huc_centroids['name'].tolist(),
+                        hovermode='closest',
+                        marker=dict(size=100, color='white', opacity=0),
+                        showlegend=False
+                    )
+                ]
+            else:
+                print("Debug: No USGS SpC data found")
+                data = [
+                    dict(
+                        lat=CSU_df['Location_LatitudeStandardized'],
+                        lon=CSU_df['Location_LongitudeStandardized'],
+                        type='scattermapbox',
+                        hovertext=CSU_df['Location_Name'],
+                        marker=dict(size=5, color='grey', opacity=0.5),
+                        name='No Data Available',
+                        showlegend=False
+                    ),
+                    dict(
+                        lat=huc_centroids['lat'],
+                        lon=huc_centroids['lon'],
+                        type='scattermapbox',
+                        hovertext=huc_centroids['name'],
+                        hovermode='closest',
+                        marker=dict(size=100, color='white', opacity=0),
+                        showlegend=False
+                    )
+                ]
         
-        if not df.empty:
-            print(f"Debug: Found {len(df)} filtered records")
+        # BRANCH 2: WQX characteristic selected
+        else:
+            df = filter_data(CSU_df, characteristic, fraction, basin, site, sample_type, date_range[0], date_range[1])
             
-            # Convert to numeric
-            df['Result_Measure'] = pd.to_numeric(df['Result_Measure'], errors='coerce')
-            df['Location_LatitudeStandardized'] = pd.to_numeric(df['Location_LatitudeStandardized'], errors='coerce')
-            df['Location_LongitudeStandardized'] = pd.to_numeric(df['Location_LongitudeStandardized'], errors='coerce')
+            if not df.empty:
+                print(f"Debug: Found {len(df)} filtered records")
+                
+                df['Result_Measure'] = pd.to_numeric(df['Result_Measure'], errors='coerce')
+                df['Location_LatitudeStandardized'] = pd.to_numeric(df['Location_LatitudeStandardized'], errors='coerce')
+                df['Location_LongitudeStandardized'] = pd.to_numeric(df['Location_LongitudeStandardized'], errors='coerce')
+                df = df.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized', 'Result_Measure'])
+
+                agg_dict = {
+                    'Location_LatitudeStandardized': 'mean',
+                    'Location_LongitudeStandardized': 'mean',
+                    'Result_Measure': 'mean'
+                }
+                df_mean = df.groupby('Location_Name', as_index=False).agg(agg_dict)
+                df_mean['Result_Characteristic'] = characteristic
+                
+                non_selected = CSU_df[~CSU_df['Location_Name'].isin(df_mean['Location_Name'].unique())]
+
+                data = [
+                    dict(
+                        lat=non_selected['Location_LatitudeStandardized'],
+                        lon=non_selected['Location_LongitudeStandardized'],
+                        type='scattermapbox',
+                        hovertext=non_selected['Location_Name'],
+                        marker=dict(size=5, color='grey', opacity=0.5),
+                        name='Other Stations',
+                        showlegend=False
+                    ),
+                    dict(
+                        lat=df_mean['Location_LatitudeStandardized'],
+                        lon=df_mean['Location_LongitudeStandardized'],
+                        type='scattermapbox',
+                        hovertext=[f"{name}<br>{char}: {val:.2f}" for name, char, val in
+                                zip(df_mean['Location_Name'],
+                                    df_mean['Result_Characteristic'],
+                                    df_mean['Result_Measure'])],
+                        marker=dict(size=10, color='blue', opacity=1),
+                        name='Selected Data',
+                        showlegend=False
+                    ),
+                    dict(
+                        lat=huc_centroids['lat'],
+                        lon=huc_centroids['lon'],
+                        type='scattermapbox',
+                        hovertext=huc_centroids['name'],
+                        hovermode='closest',
+                        marker=dict(size=100, color='white', opacity=0),
+                        showlegend=False
+                    )
+                ]
+
+                # Add USGS sites if selected
+                if has_usgs_sites and HAS_USGS_DATA:
+                    usgs_selected = [s for s in selected_sites if s in usgs_site_names]
+                    usgs_display = USGS_MAPPING[USGS_MAPPING['WQX_Site_Name'].isin(usgs_selected)].copy()
+                    
+                    if not usgs_display.empty and 'Latitude' in usgs_display.columns:
+                        usgs_display['Latitude'] = pd.to_numeric(usgs_display['Latitude'], errors='coerce')
+                        usgs_display['Longitude'] = pd.to_numeric(usgs_display['Longitude'], errors='coerce')
+                        usgs_display = usgs_display.dropna(subset=['Latitude', 'Longitude'])
+                        
+                        if not usgs_display.empty:
+                            data.append(dict(
+                                lat=usgs_display['Latitude'].tolist(),
+                                lon=usgs_display['Longitude'].tolist(),
+                                type='scattermapbox',
+                                hovertext=[f"{name}<br>(USGS Site)" for name in usgs_display['WQX_Site_Name']],
+                                marker=dict(size=15, color='#00CED1', opacity=1),
+                                name='USGS Sites',
+                                showlegend=True
+                            ))
+                            print(f"Debug: Added {len(usgs_display)} USGS sites to WQX map")
+                            
+                # If NO sites selected, also show all USGS sites by default
+                elif not selected_sites and HAS_USGS_DATA and USGS_MAPPING is not None:
+                    if 'Latitude' in USGS_MAPPING.columns and 'Longitude' in USGS_MAPPING.columns:
+                        all_usgs = USGS_MAPPING[['WQX_Site_Name', 'Latitude', 'Longitude']].copy()
+                        all_usgs['Latitude'] = pd.to_numeric(all_usgs['Latitude'], errors='coerce')
+                        all_usgs['Longitude'] = pd.to_numeric(all_usgs['Longitude'], errors='coerce')
+                        all_usgs = all_usgs.dropna(subset=['Latitude', 'Longitude'])
+                        
+                        if not all_usgs.empty:
+                            data.append(dict(
+                                lat=all_usgs['Latitude'].tolist(),
+                                lon=all_usgs['Longitude'].tolist(),
+                                type='scattermapbox',
+                                hovertext=[f"{name}<br>(USGS Site)" for name in all_usgs['WQX_Site_Name']],
+                                marker=dict(size=7, color='#00CED1', opacity=0.8),
+                                name='USGS Sites',
+                                showlegend=True
+                            ))
+                            print(f"Debug: Added {len(all_usgs)} USGS sites to default WQX view")
+            else:
+                data = [
+                    dict(
+                        lat=CSU_df['Location_LatitudeStandardized'],
+                        lon=CSU_df['Location_LongitudeStandardized'],
+                        type='scattermapbox',
+                        hovertext=CSU_df['Location_Name'],
+                        marker=dict(size=5, color='grey', opacity=0.5),
+                        name='No Data Available',
+                        showlegend=False
+                    ),
+                    dict(
+                        lat=huc_centroids['lat'],
+                        lon=huc_centroids['lon'],
+                        type='scattermapbox',
+                        hovertext=huc_centroids['name'],
+                        hovermode='closest',
+                        marker=dict(size=100, color='white', opacity=0),
+                        showlegend=False
+                    )
+                ]
+
+                # Add USGS sites if selected
+                if has_usgs_sites and HAS_USGS_DATA:
+                    usgs_selected = [s for s in selected_sites if s in usgs_site_names]
+                    usgs_display = USGS_MAPPING[USGS_MAPPING['WQX_Site_Name'].isin(usgs_selected)].copy()
+                    
+                    if not usgs_display.empty and 'Latitude' in usgs_display.columns:
+                        usgs_display['Latitude'] = pd.to_numeric(usgs_display['Latitude'], errors='coerce')
+                        usgs_display['Longitude'] = pd.to_numeric(usgs_display['Longitude'], errors='coerce')
+                        usgs_display = usgs_display.dropna(subset=['Latitude', 'Longitude'])
+                        
+                        if not usgs_display.empty:
+                            data.append(dict(
+                                lat=usgs_display['Latitude'].tolist(),
+                                lon=usgs_display['Longitude'].tolist(),
+                                type='scattermapbox',
+                                hovertext=[f"{name}<br>(USGS Site)" for name in usgs_display['WQX_Site_Name']],
+                                marker=dict(size=15, color='#00CED1', opacity=1),
+                                name='USGS Sites',
+                                showlegend=True
+                            ))
+                            print(f"Debug: Added {len(usgs_display)} USGS sites to map")
+    
+    # BRANCH 3: No characteristic/basin selected - show all sites
+    else:
+        print("Debug: No characteristic or basin selected")
+        
+        # Get all WQX sites
+        all_wqx_sites = CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates()
+        all_wqx_sites['Location_LatitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LatitudeStandardized'], errors='coerce')
+        all_wqx_sites['Location_LongitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LongitudeStandardized'], errors='coerce')
+        all_wqx_sites = all_wqx_sites.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized'])
+        
+        # Get all USGS sites
+        all_usgs_sites = pd.DataFrame()
+        if HAS_USGS_DATA and USGS_MAPPING is not None and 'Latitude' in USGS_MAPPING.columns:
+            all_usgs_sites = USGS_MAPPING[['WQX_Site_Name', 'Latitude', 'Longitude']].copy()
+            all_usgs_sites = all_usgs_sites.rename(columns={
+                'WQX_Site_Name': 'Location_Name',
+                'Latitude': 'Location_LatitudeStandardized',
+                'Longitude': 'Location_LongitudeStandardized'
+            })
+            all_usgs_sites['Location_LatitudeStandardized'] = pd.to_numeric(all_usgs_sites['Location_LatitudeStandardized'], errors='coerce')
+            all_usgs_sites['Location_LongitudeStandardized'] = pd.to_numeric(all_usgs_sites['Location_LongitudeStandardized'], errors='coerce')
+            all_usgs_sites = all_usgs_sites.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized'])
+            all_usgs_sites['is_usgs'] = True
+        
+        all_wqx_sites['is_usgs'] = False
+        all_sites = pd.concat([all_wqx_sites, all_usgs_sites], ignore_index=True)
+        
+        # If sites are selected, highlight them
+        if selected_sites:
+            print(f"Debug: Highlighting {len(selected_sites)} selected site(s)")
+            selected_df = all_sites[all_sites['Location_Name'].isin(selected_sites)]
+            non_selected_df = all_sites[~all_sites['Location_Name'].isin(selected_sites)]
             
-            # Remove any rows where conversion failed
-            df = df.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized', 'Result_Measure'])
-
-            # Aggregate data by monitoring location
-            agg_dict = {
-                'Location_LatitudeStandardized': 'mean',
-                'Location_LongitudeStandardized': 'mean',
-                'Result_Measure': 'mean'
-            }
-
-            df_mean = df.groupby('Location_Name', as_index=False).agg(agg_dict)
-            df_mean['Result_Characteristic'] = characteristic
-            
-            # Get non-selected stations (outside the basin or different characteristics)
-            non_selected = CSU_df[~CSU_df['Location_Name'].isin(df_mean['Location_Name'].unique())]
-
-            # Create the map data
             data = [
-                dict(  # Grey points for non-selected stations
-                    lat=non_selected['Location_LatitudeStandardized'],
-                    lon=non_selected['Location_LongitudeStandardized'],
+                dict(
+                    lat=non_selected_df['Location_LatitudeStandardized'].tolist(),
+                    lon=non_selected_df['Location_LongitudeStandardized'].tolist(),
                     type='scattermapbox',
-                    hovertext=non_selected['Location_Name'],
+                    hovertext=non_selected_df['Location_Name'].tolist(),
                     marker=dict(size=5, color='grey', opacity=0.5),
                     name='Other Stations',
                     showlegend=False
                 ),
-                dict(  # Blue points for selected basin/characteristic (CHANGED from color-coded)
-                    lat=df_mean['Location_LatitudeStandardized'],
-                    lon=df_mean['Location_LongitudeStandardized'],
+                dict(
+                    lat=selected_df['Location_LatitudeStandardized'].tolist(),
+                    lon=selected_df['Location_LongitudeStandardized'].tolist(),
                     type='scattermapbox',
-                    hovertext=[f"{name}<br>{char}: {val:.2f}" for name, char, val in
-                            zip(df_mean['Location_Name'],
-                                df_mean['Result_Characteristic'],
-                                df_mean['Result_Measure'])],
-                    marker=dict(size=10, color='blue', opacity=1),  # ← Changed to 'blue' instead of df_mean['color']
-                    name='Selected Data',
-                    showlegend=False
+                    hovertext=[f"{name}<br>{'(USGS Site)' if is_usgs else '(WQX Site)'}" 
+                              for name, is_usgs in zip(selected_df['Location_Name'], selected_df['is_usgs'])],
+                    marker=dict(size=15, color='#00CED1', opacity=1),
+                    name='Selected Sites',
+                    showlegend=True
                 ),
-                dict(  # Basin centroids for hover text
-                    lat=huc_centroids['lat'],
-                    lon=huc_centroids['lon'],
+                dict(
+                    lat=huc_centroids['lat'].tolist(),
+                    lon=huc_centroids['lon'].tolist(),
                     type='scattermapbox',
-                    hovertext=huc_centroids['name'],
+                    hovertext=huc_centroids['name'].tolist(),
                     hovermode='closest',
                     marker=dict(size=100, color='white', opacity=0),
                     showlegend=False
                 )
             ]
         else:
-            print("Debug: No filtered data found")
-            # If no filtered data, show all stations as grey
+            # No sites selected - show all
+            print(f"Debug: Showing all sites (WQX: {len(all_wqx_sites)}, USGS: {len(all_usgs_sites)})")
+            
             data = [
                 dict(
-                    lat=CSU_df['Location_LatitudeStandardized'],
-                    lon=CSU_df['Location_LongitudeStandardized'],
+                    lat=all_wqx_sites['Location_LatitudeStandardized'].tolist(),
+                    lon=all_wqx_sites['Location_LongitudeStandardized'].tolist(),
                     type='scattermapbox',
-                    hovertext=CSU_df['Location_Name'],
-                    marker=dict(size=5, color='grey', opacity=0.5),
-                    name='No Data Available',
-                    showlegend=False
+                    hovertext=all_wqx_sites['Location_Name'].tolist(),
+                    marker=dict(size=5, color='blue', opacity=0.7),
+                    name='WQX Sites',
+                    showlegend=True
                 ),
-                dict(  # Basin centroids
-                    lat=huc_centroids['lat'],
-                    lon=huc_centroids['lon'],
+                dict(
+                    lat=huc_centroids['lat'].tolist(),
+                    lon=huc_centroids['lon'].tolist(),
                     type='scattermapbox',
-                    hovertext=huc_centroids['name'],
+                    hovertext=huc_centroids['name'].tolist(),
                     hovermode='closest',
                     marker=dict(size=100, color='white', opacity=0),
                     showlegend=False
                 )
             ]
-    else:
-        print("Debug: No characteristic or basin selected")
-        # If no characteristic or basin selected, use initial data
-        data = data_initial
+            
+            if not all_usgs_sites.empty:
+                data.append(dict(
+                    lat=all_usgs_sites['Location_LatitudeStandardized'].tolist(),
+                    lon=all_usgs_sites['Location_LongitudeStandardized'].tolist(),
+                    type='scattermapbox',
+                    hovertext=[f"{name}<br>(USGS Site)" for name in all_usgs_sites['Location_Name']],
+                    marker=dict(size=7, color='#00CED1', opacity=0.8),
+                    name='USGS Sites',
+                    showlegend=True
+                ))
+                print(f"Debug: Added {len(all_usgs_sites)} USGS sites to default map")
 
     # Add canals/ditches if any are selected
     if selected_canals:
@@ -2779,17 +3157,17 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             
             # Color scheme
             river_colors = {
-                'arkansas': '#1E90FF',       # Dodger Blue - main stem
-                'fountain': '#4169E1',       # Royal Blue
-                'st. charles': '#6495ED',    # Cornflower Blue
+                'arkansas': '#1E90FF',
+                'fountain': '#4169E1',
+                'st. charles': '#6495ED',
                 'st charles': '#6495ED',     
-                'huerfano': '#00CED1',       # Dark Turquoise
-                'apishapa': '#20B2AA',       # Light Sea Green
-                'purgatoire': '#48D1CC',     # Medium Turquoise
-                'horse': '#40E0D0',          # Turquoise
-                'timpas': '#5F9EA0',         # Cadet Blue
-                'crooked': '#87CEEB',        # Sky Blue
-                'salt': '#87CEFA'            # Light Sky Blue
+                'huerfano': '#00CED1',
+                'apishapa': '#20B2AA',
+                'purgatoire': '#48D1CC',
+                'horse': '#40E0D0',
+                'timpas': '#5F9EA0',
+                'crooked': '#87CEEB',
+                'salt': '#87CEFA'
             }
             
             # Group by river name
@@ -2803,7 +3181,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 print(f"  Number of segments: {len(river_segments)}")
                 
                 # Determine color and width
-                color = '#4682B4'  # Default Steel Blue
+                color = '#4682B4'
                 line_width = 2
                 
                 river_name_lower = str(river_name).lower()
@@ -2811,7 +3189,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                     if keyword in river_name_lower:
                         color = keyword_color
                         if keyword == 'arkansas':
-                            line_width = 4  # Arkansas River is thicker
+                            line_width = 4
                         break
                 
                 # Extract coordinates
@@ -2844,27 +3222,25 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                         continue
                 
                 if lons and lats:
-                    # Check coordinate ranges
-                    valid_lons = [x for x in lons if x is not None]
-                    valid_lats = [y for y in lats if y is not None]
+                        valid_lons = [x for x in lons if x is not None]
+                        valid_lats = [y for y in lats if y is not None]
                     
-                    if valid_lons and valid_lats:
-                        river_name_display = river_name.title()
-                        
-                        river_trace = dict(
-                            lat=lats,
-                            lon=lons,
-                            type='scattermapbox',
-                            mode='lines',
-                            line=dict(width=line_width, color=color),
-                            hovertemplate=f'<b>🌊 {river_name_display}</b><extra></extra>',
-                            name=river_name_display,
-                            showlegend=True,
-                            legendgroup='rivers'
-                        )
-                        data.append(river_trace)
-                        traces_added += 1
-
+                        if valid_lons and valid_lats:
+                            river_name_display = river_name.title()
+                            
+                            river_trace = dict(
+                                lat=lats,
+                                lon=lons,
+                                type='scattermapbox',
+                                mode='lines',
+                                line=dict(width=line_width, color=color),
+                                hovertemplate=f'<b>🌊 {river_name_display}</b><extra></extra>',
+                                name=river_name_display,
+                                showlegend=True,
+                                legendgroup='rivers'
+                            )
+                            data.append(river_trace)
+                            traces_added += 1
             
         except Exception as e:
             print(f"❌ ERROR adding rivers: {e}")
@@ -2876,7 +3252,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
         elif not rivers_toggle or len(rivers_toggle) == 0:
             print(f"Debug: Rivers toggle is empty (value: {rivers_toggle})")
 
-      # Add stream segments if selected
+    # Add stream segments if selected
     if additional_layers and 'segments' in additional_layers and stream_segments_gdf is not None:
         try:
             print(f"\n=== ADDING STREAM SEGMENTS TO MAP ===")
@@ -2894,16 +3270,13 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             # Convert back to WGS84
             segments_to_show = segments_in_huc8.to_crs('EPSG:4326')
             
-            # Group by category and create separate traces for each
-            # Convert Cat to string and fill NaN with 'NA'
+            # Group by category
             segments_to_show['Cat'] = segments_to_show['Cat'].fillna('NA').astype(str)
             categories = sorted(segments_to_show['Cat'].unique())
             print(f"Found categories: {categories}")
             
-            # Define display order (most impaired first for legend visibility)
             category_order = ['5', '5a', '4', '4a', '4b', '4c', '3', '3a', '3b', '2', '1', '1a', '1b', 'NA', 'Other']
             
-            # Sort categories by priority order
             def get_priority(cat):
                 try:
                     return category_order.index(str(cat))
@@ -2918,12 +3291,10 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 if len(cat_segments) == 0:
                     continue
                 
-                # Get color and name for this category
                 cat_info = ASSESSMENT_CATEGORIES.get(cat, ASSESSMENT_CATEGORIES['Other'])
                 color = cat_info['color']
                 cat_name = cat_info['name']
                 
-                # Combine all segments of this category into one trace
                 all_lons = []
                 all_lats = []
                 
@@ -2954,17 +3325,13 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 if not all_lons or not all_lats:
                     continue
                 
-                # Add one trace per category with enhanced styling
                 segment_trace = dict(
                     lat=all_lats,
                     lon=all_lons,
                     type='scattermapbox',
                     mode='lines',
-                    line=dict(
-                        width=4,  # Thicker lines for better visibility
-                        color=color
-                    ),
-                    opacity=0.85,  # Slight transparency
+                    line=dict(width=4, color=color),
+                    opacity=0.85,
                     hovertemplate=f'<b>303(d) Category {cat}</b><br>{cat_name}<br>({len(cat_segments)} segments)<extra></extra>',
                     name=f'Cat {cat}: {cat_name}',
                     showlegend=True,
@@ -2972,44 +3339,27 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                     legendgrouptitle=dict(text='303(d) Stream Assessments', font=dict(size=12, color='white', family='Arial'))
                 )
                 data.append(segment_trace)
-                
-                print(f"  ✓ Cat {cat}: {len(cat_segments)} segments - {cat_name} - Color: {color}")
-            
-            print(f"✓ Added {len(categories_sorted)} assessment categories to map")
-            print(f"=== STREAM SEGMENTS COMPLETE ===\n")
             
         except Exception as e:
-            print(f"❌ ERROR adding stream segments: {e}")
             import traceback
             traceback.print_exc()
 
     # Add lakes if selected
     if additional_layers and 'lakes' in additional_layers and lakes_gdf is not None:
         try:
-            print(f"\n=== ADDING LAKES TO MAP ===")
-            
-            # Filter to HUC8 basins
             lakes_projected = lakes_gdf.to_crs('EPSG:26913')
             basins_projected = BASINS_GDF.to_crs('EPSG:26913')
             
             huc8_union = basins_projected.geometry.union_all()
             huc8_buffered = huc8_union.buffer(1000)
             
-            lakes_in_huc8 = lakes_projected[lakes_projected.geometry.intersects(huc8_buffered)]
-            print(f"Filtered to {len(lakes_in_huc8)} lakes in study area")
-            
-            # Convert back to WGS84
+            lakes_in_huc8 = lakes_projected[lakes_projected.geometry.intersects(huc8_buffered)]            
             lakes_to_show = lakes_in_huc8.to_crs('EPSG:4326')
             
-            # Convert Cat to string and fill NaN with 'Other'
             lakes_to_show['Cat'] = lakes_to_show['Cat'].fillna('Other').astype(str)
             categories = sorted(lakes_to_show['Cat'].unique())
-            print(f"Found lake categories: {categories}")
-            
-            # Define display order (most impaired first)
             category_order = ['5', '4a', '3b', '3a', '2', '1a', 'Other']
             
-            # Sort categories by priority order
             def get_priority(cat):
                 try:
                     return category_order.index(str(cat))
@@ -3024,12 +3374,10 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 if len(cat_lakes) == 0:
                     continue
                 
-                # Get color and name for this category
                 cat_info = ASSESSMENT_CATEGORIES.get(cat, ASSESSMENT_CATEGORIES['Other'])
                 color = cat_info['color']
                 cat_name = cat_info['name']
                 
-                # Combine all lake polygons for this category
                 all_lons = []
                 all_lats = []
                 
@@ -3054,19 +3402,15 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                                 all_lons.append(None)
                                 all_lats.append(None)
                     except Exception as e:
-                        print(f"  Warning: Error processing lake geometry: {e}")
                         continue
                 
                 if not all_lons or not all_lats:
                     continue
                 
-                # Create rgba color with transparency for fill
-                # Convert hex to rgb
                 hex_color = color.lstrip('#')
                 r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-                fill_color = f'rgba({r}, {g}, {b}, 0.4)'  # 40% opacity for fill
+                fill_color = f'rgba({r}, {g}, {b}, 0.4)'
                 
-                # Add trace for this category
                 lake_trace = dict(
                     lat=all_lats,
                     lon=all_lons,
@@ -3074,7 +3418,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                     mode='lines',
                     fill='toself',
                     fillcolor=fill_color,
-                    line=dict(width=2, color=color),  # Solid border
+                    line=dict(width=2, color=color),
                     hovertemplate=f'<b>Lake/Reservoir - Cat {cat}</b><br>{cat_name}<br>({len(cat_lakes)} waterbodies)<extra></extra>',
                     name=f'Cat {cat}: {cat_name}',
                     showlegend=True,
@@ -3082,11 +3426,6 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                     legendgrouptitle=dict(text='Lakes/Reservoirs [2026 Provisional]', font=dict(size=12, color='white', family='Arial'))
                 )
                 data.append(lake_trace)
-                
-                print(f"  ✓ Cat {cat}: {len(cat_lakes)} lakes - {cat_name} - Color: {color}")
-            
-            print(f"✓ Added {len(categories_sorted)} lake categories to map")
-            print(f"=== LAKES COMPLETE ===\n")
             
         except Exception as e:
             print(f"❌ ERROR adding lakes: {e}")
@@ -3182,21 +3521,39 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
         except Exception as e:
             print(f"Debug: Error processing click data: {e}")
             pass
-    # Check if USGS daily specific conductance was selected
-    is_usgs_spc = (characteristic == 'Specific conductance (USGS-daily)')
-    
-    # If USGS SpC selected, handle it specially
-    if is_usgs_spc and HAS_USGS_DATA:
-        # Get USGS data
-        selected_sites = [site] if isinstance(site, str) and site else (site if isinstance(site, list) else [])
-        
-        usgs_sc_data = get_usgs_data_for_sites(
-            USGS_df,
-            selected_sites,
-            USGS_MAPPING,
-            date_range,
-            parameter='SpCond_uScm'
-        )
+        # Check if USGS daily SpC was selected
+        is_usgs_spc = (characteristic == 'Specific conductance (USGS-daily)')
+
+        # Check if any USGS sites are selected
+        selected_sites = []
+        if site and site != 'All':
+            if isinstance(site, str):
+                selected_sites = [site]
+            elif isinstance(site, list):
+                selected_sites = [s for s in site if s != 'All']
+
+        # Check if selected sites include USGS sites
+        has_usgs_sites = False
+        if HAS_USGS_DATA and USGS_MAPPING is not None and selected_sites:
+            usgs_site_names = set(USGS_MAPPING['WQX_Site_Name'].tolist())
+            has_usgs_sites = any(s in usgs_site_names for s in selected_sites)
+
+        # Filter and process the data
+        data = []
+        if characteristic and basin:
+
+            # If USGS SpC selected, handle it specially
+            if is_usgs_spc and HAS_USGS_DATA:
+                # Get USGS data
+                selected_sites = [site] if isinstance(site, str) and site else (site if isinstance(site, list) else [])
+                
+                usgs_sc_data = get_usgs_data_for_sites(
+                    USGS_df,
+                    selected_sites,
+                    USGS_MAPPING,
+                    date_range,
+                    parameter='SpCond_uScm'
+                )
         
         if usgs_sc_data.empty:
             fig = go.Figure()
@@ -4204,17 +4561,87 @@ def update_date_range_display(date_range, characteristic, fraction, basin, site,
 def update_table(characteristic, fraction, basin, site, sample_type, date_range):
     # Store original characteristic before converting to None
     original_characteristic = characteristic
+    
+    # Check if USGS daily SpC was selected
+    is_usgs_spc = (characteristic == 'Specific conductance (USGS-daily)')
 
     # Convert "All" to None
-    if characteristic == "All":
+    if not is_usgs_spc and characteristic == "All":
         characteristic = None
     if basin == "All":
         basin = None
     if site == "All":
         site = None
     if sample_type == "All":
-            sample_type = None
+        sample_type = None
 
+    # Handle USGS SpC specially
+    if is_usgs_spc and HAS_USGS_DATA:
+        selected_sites = [site] if isinstance(site, str) and site else (site if isinstance(site, list) else [])
+        
+        usgs_sc_data = get_usgs_data_for_sites(
+            USGS_df,
+            selected_sites,
+            USGS_MAPPING,
+            date_range,
+            parameter='SpCond_uScm'
+        )
+        
+        if usgs_sc_data.empty:
+            return [{'Statistic': 'No USGS Specific Conductance data available', 'Value': '', 'Units': ''}]
+        
+        # Convert to format similar to WQX data
+        numeric_values = pd.to_numeric(usgs_sc_data['SpCond_uScm'], errors='coerce').dropna()
+        data_dates = pd.to_datetime(usgs_sc_data['Date'])
+        total_records = len(usgs_sc_data)
+        num_valid = len(numeric_values)
+        num_empty = total_records - num_valid
+        
+        earliest_date = data_dates.min().strftime('%m/%d/%Y')
+        latest_date = data_dates.max().strftime('%m/%d/%Y')
+        
+        # Calculate statistics
+        stats = {
+            'Analysis Period': f"{date_range[0]} - {date_range[1]}",
+            'Actual Data Range': f"{earliest_date} to {latest_date}",
+            'Total Records': total_records,
+            'Valid Records': num_valid,
+            'Empty/Invalid Records': num_empty,
+            'Mean': np.mean(numeric_values),
+            'Std Deviation': np.std(numeric_values, ddof=1) if num_valid > 1 else 0,
+            'Minimum': np.min(numeric_values),
+            'Maximum': np.max(numeric_values),
+            '25th Percentile': np.percentile(numeric_values, 25),
+            '50th Percentile (Median)': np.percentile(numeric_values, 50),
+            '75th Percentile': np.percentile(numeric_values, 75),
+            '85th Percentile': np.percentile(numeric_values, 85),
+            '95th Percentile': np.percentile(numeric_values, 95)
+        }
+        
+        unit = 'µS/cm'
+        
+        # Format the data for the table
+        summary_data = []
+        for stat_name, value in stats.items():
+            if stat_name in ['Total Records', 'Valid Records', 'Empty/Invalid Records']:
+                formatted_value = f"{int(value)}"
+                unit_display = "records (USGS Daily)"
+            elif stat_name in ['Analysis Period', 'Actual Data Range']:
+                formatted_value = str(value)
+                unit_display = ""
+            else:
+                formatted_value = f"{value:.3f}"
+                unit_display = unit
+            
+            summary_data.append({
+                'Statistic': stat_name,
+                'Value': formatted_value,
+                'Units': unit_display
+            })
+        
+        return summary_data
+    
+    # Otherwise, get WQX data (rest of function remains the same)
     data = filter_data(CSU_df, characteristic, fraction, basin, site, sample_type, date_range[0], date_range[1])
     
     if data is None or data.empty:
@@ -4319,6 +4746,148 @@ def update_table(characteristic, fraction, basin, site, sample_type, date_range)
     prevent_initial_call=True
 )
 def plot_heatmap(characteristic, fraction, basin, site, sample_type, date_range):
+    # Store original characteristic before converting to None
+    original_characteristic = characteristic
+    
+    # Check if USGS daily SpC was selected
+    is_usgs_spc = (characteristic == 'Specific conductance (USGS-daily)')
+    
+    # Handle USGS SpC specially
+    if is_usgs_spc and HAS_USGS_DATA:
+        selected_sites = [site] if isinstance(site, str) and site else (site if isinstance(site, list) else [])
+        
+        usgs_sc_data = get_usgs_data_for_sites(
+            USGS_df,
+            selected_sites,
+            USGS_MAPPING,
+            date_range,
+            parameter='SpCond_uScm'
+        )
+        
+        if usgs_sc_data.empty:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No USGS Specific Conductance data available",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                showarrow=False,
+                font=dict(size=16, color="white")
+            )
+            fig.update_layout(
+                plot_bgcolor='#2d2d2d',
+                paper_bgcolor='#1e1e1e',
+                font=dict(color='white'),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                title='USGS Specific Conductance Heatmap - No Data',
+                title_font=dict(color='white')
+            )
+            return fig
+        
+        # Convert to numeric
+        numeric_values = pd.to_numeric(usgs_sc_data['SpCond_uScm'], errors='coerce').dropna()
+        
+        if len(numeric_values) == 0:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No valid USGS data available",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                showarrow=False,
+                font=dict(size=16, color="white")
+            )
+            fig.update_layout(
+                plot_bgcolor='#2d2d2d',
+                paper_bgcolor='#1e1e1e',
+                font=dict(color='white'),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                title='USGS Specific Conductance Heatmap - No Valid Data',
+                title_font=dict(color='white')
+            )
+            return fig
+        
+        unit = 'µS/cm'
+        
+        # Calculate statistics for the colorbar annotation
+        min_val = np.min(numeric_values)
+        max_val = np.max(numeric_values)
+        median_val = np.median(numeric_values)
+        p75_val = np.percentile(numeric_values, 75)
+        p90_val = np.percentile(numeric_values, 90)
+        
+        # Create the heatmap
+        figure = go.Figure(data = go.Heatmap(
+            z = usgs_sc_data.loc[numeric_values.index, 'SpCond_uScm'],
+            x = usgs_sc_data.loc[numeric_values.index, 'Date'],
+            y = usgs_sc_data.loc[numeric_values.index, 'Site_Name'], 
+            colorscale = create_data_driven_color_scale(numeric_values),
+            colorbar=dict(
+                title=dict(
+                    text=f"Specific Conductance<br>(USGS Daily)<br>({unit})",
+                    font=dict(color='white', size=12)
+                ),
+                tickfont=dict(color='white'),
+                tickmode='linear',
+                tick0=min_val,
+                dtick=(max_val - min_val) / 5,
+                bgcolor='rgba(45, 45, 45, 0.8)',
+                bordercolor='white',
+                borderwidth=1
+            ),
+            hovertemplate='<b>%{y}</b><br>' +
+                        'Date: %{x}<br>' +
+                        f'SpCond: %{{z:.1f}} {unit}<br>' +
+                        '<extra></extra>'
+        ))
+
+        # Add color legend annotation
+        color_legend = (
+            f"<b>Color Scale (from data):</b><br>" +
+            f"🔵 Dark Blue: {min_val:.1f} {unit} (minimum)<br>" +
+            f"🔵 Blue: {np.percentile(numeric_values, 25):.1f} {unit} (25th percentile)<br>" +
+            f"🟢 Green: {median_val:.1f} {unit} (median)<br>" +
+            f"🟡 Yellow: {p75_val:.1f} {unit} (75th percentile)<br>" +
+            f"🟠 Orange: {p90_val:.1f} {unit} (90th percentile)<br>" +
+            f"🔴 Red: {max_val:.1f} {unit} (maximum)"
+        )
+
+        figure.update_layout(
+            plot_bgcolor='#2d2d2d',
+            paper_bgcolor='#1e1e1e',
+            font=dict(color='white'),
+            xaxis=dict(
+                color='white',
+                title=dict(text='Date', font=dict(color='white'))
+            ),
+            yaxis=dict(
+                color='white',
+                title=dict(text='Monitoring Location', font=dict(color='white'))
+            ),
+            title=dict(
+                text=f'USGS Specific Conductance Heatmap ({unit})<br><sub>Range: {min_val:.2f}-{max_val:.2f} {unit} | Median: {median_val:.2f} {unit}</sub>',
+                font=dict(color='white', size=16),
+                x=0.5
+            ),
+            annotations=[
+                dict(
+                    text=color_legend,
+                    xref="paper", yref="paper",
+                    x=-0.3, y=1.25,
+                    xanchor='left', yanchor='top',
+                    showarrow=False,
+                    font=dict(size=10, color="white"),
+                    bgcolor="rgba(45, 45, 45, 0.8)",
+                    bordercolor="white",
+                    borderwidth=1
+                )
+            ],
+            margin=dict(t=80, r=50, b=50, l=50)
+        )
+
+        return figure
+    
+    # Otherwise, handle WQX data (rest of function remains the same)
     # Convert "All" to None
     if characteristic == "All":
         characteristic = None
@@ -4372,7 +4941,6 @@ def plot_heatmap(characteristic, fraction, basin, site, sample_type, date_range)
             title_font=dict(color='white')
         )
         return fig
-        
           
     # Check if we have valid numeric data
     numeric_values = pd.to_numeric(data['Result_Measure'], errors='coerce').dropna()
@@ -4392,13 +4960,13 @@ def plot_heatmap(characteristic, fraction, basin, site, sample_type, date_range)
             font=dict(color='white'),
             xaxis=dict(visible=False),
             yaxis=dict(visible=False),
-            title=f'{characteristic} Heatmap - No Valid Data',
+            title=f'{original_characteristic} Heatmap - No Valid Data',
             title_font=dict(color='white')
         )
         return fig
     
     # Get the appropriate unit for this characteristic
-    unit = UNITS_MAP.get(characteristic, 'units')
+    unit = UNITS_MAP.get(original_characteristic, 'units')
     
     # Calculate statistics for the colorbar annotation
     min_val = np.min(numeric_values)
@@ -4415,7 +4983,7 @@ def plot_heatmap(characteristic, fraction, basin, site, sample_type, date_range)
         colorscale = create_data_driven_color_scale(numeric_values),
         colorbar=dict(
            title=dict(
-                text=f"{characteristic}<br>({unit})",
+                text=f"{original_characteristic}<br>({unit})",
                 font=dict(color='white', size=12)
             ),
             tickfont=dict(color='white'),
@@ -4428,7 +4996,7 @@ def plot_heatmap(characteristic, fraction, basin, site, sample_type, date_range)
         ),
         hovertemplate='<b>%{y}</b><br>' +
                       'Date: %{x}<br>' +
-                      f'{characteristic}: %{{z:.1f}} {unit}<br>' +
+                      f'{original_characteristic}: %{{z:.1f}} {unit}<br>' +
                       '<extra></extra>'
     ))
 
@@ -4456,7 +5024,7 @@ def plot_heatmap(characteristic, fraction, basin, site, sample_type, date_range)
             title=dict(text='Monitoring Location', font=dict(color='white'))
         ),
         title=dict(
-            text=f'{characteristic} Concentration Heatmap ({unit})<br><sub>Range: {min_val:.2f}-{max_val:.2f} {unit} | Median: {median_val:.2f} {unit}</sub>',
+            text=f'{original_characteristic} Concentration Heatmap ({unit})<br><sub>Range: {min_val:.2f}-{max_val:.2f} {unit} | Median: {median_val:.2f} {unit}</sub>',
             font=dict(color='white', size=16),
             x=0.5
         ),
