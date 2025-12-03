@@ -3503,9 +3503,10 @@ def get_usgs_data_for_sites(usgs_df, wqx_sites, mapping_df, date_range, paramete
     ],
     prevent_initial_call=True
 )
+
 def plot_data(characteristic, fraction, basin, site, sample_type, date_range, additional_data, clickData):  
     
-    # Handle click data - override site selection if a point was clicked
+    # Handle click data
     clicked_site = None
     if clickData:
         try:
@@ -3521,40 +3522,36 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
         except Exception as e:
             print(f"Debug: Error processing click data: {e}")
             pass
-        # Check if USGS daily SpC was selected
-        is_usgs_spc = (characteristic == 'Specific conductance (USGS-daily)')
+    
+    # Check if USGS daily SpC was selected
+    is_usgs_spc = (characteristic == 'Specific conductance (USGS-daily)')
 
-        # Check if any USGS sites are selected
-        selected_sites = []
-        if site and site != 'All':
-            if isinstance(site, str):
-                selected_sites = [site]
-            elif isinstance(site, list):
-                selected_sites = [s for s in site if s != 'All']
+    # Check if any USGS sites are selected
+    selected_sites = []
+    if site and site != 'All':
+        if isinstance(site, str):
+            selected_sites = [site]
+        elif isinstance(site, list):
+            selected_sites = [s for s in site if s != 'All']
 
-        # Check if selected sites include USGS sites
-        has_usgs_sites = False
-        if HAS_USGS_DATA and USGS_MAPPING is not None and selected_sites:
-            usgs_site_names = set(USGS_MAPPING['WQX_Site_Name'].tolist())
-            has_usgs_sites = any(s in usgs_site_names for s in selected_sites)
+    # Check if selected sites include USGS sites
+    has_usgs_sites = False
+    if HAS_USGS_DATA and USGS_MAPPING is not None and selected_sites:
+        usgs_site_names = set(USGS_MAPPING['WQX_Site_Name'].tolist())
+        has_usgs_sites = any(s in usgs_site_names for s in selected_sites)
 
-        # Filter and process the data
-        data = []
-        if characteristic and basin:
+    # ========================================
+    # BRANCH 1: USGS Specific Conductance
+    # ========================================
+    if is_usgs_spc and HAS_USGS_DATA:
+        usgs_sc_data = get_usgs_data_for_sites(
+            USGS_df,
+            selected_sites if selected_sites else [],
+            USGS_MAPPING,
+            date_range,
+            parameter='SpCond_uScm'
+        )
 
-            # If USGS SpC selected, handle it specially
-            if is_usgs_spc and HAS_USGS_DATA:
-                # Get USGS data
-                selected_sites = [site] if isinstance(site, str) and site else (site if isinstance(site, list) else [])
-                
-                usgs_sc_data = get_usgs_data_for_sites(
-                    USGS_df,
-                    selected_sites,
-                    USGS_MAPPING,
-                    date_range,
-                    parameter='SpCond_uScm'
-                )
-        
         if usgs_sc_data.empty:
             fig = go.Figure()
             fig.add_annotation(
@@ -3620,11 +3617,11 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
                             yaxis='y2',
                             showlegend=True,
                             marker=dict(size=10, symbol='diamond', opacity=0.8, 
-                                      color=primary_colors[idx % len(primary_colors)]),
+                                        color=primary_colors[idx % len(primary_colors)]),
                             hovertemplate='<b>%{fullData.name}</b><br>' +
-                                         'Date: %{x|%Y-%m-%d}<br>' +
-                                         'Flow: %{y:.2f} cfs<br>' +
-                                         '<extra></extra>'
+                                            'Date: %{x|%Y-%m-%d}<br>' +
+                                            'Flow: %{y:.2f} cfs<br>' +
+                                            '<extra></extra>'
                         ))
             except Exception as e:
                 print(f"Error adding WQX flow data: {e}")
@@ -3632,10 +3629,6 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
         # Add USGS Daily Flow if requested
         if additional_data and 'usgs_flow' in additional_data and HAS_USGS_DATA:
             try:
-                # Get selected sites (convert to list if needed)
-                selected_sites = [site] if isinstance(site, str) and site else (site if isinstance(site, list) else [])
-                
-                # Filter USGS data
                 usgs_flow_data = get_usgs_data_for_sites(
                     USGS_df, 
                     selected_sites, 
@@ -3646,20 +3639,12 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
                 
                 if not usgs_flow_data.empty:
                     has_secondary_axis = True
-                    print(f"Adding USGS daily flow: {len(usgs_flow_data)} records")
                     
-                    # Get list of primary data locations to match colors
-                    if is_usgs_spc:
-                        # If showing USGS SpC as primary, match to those sites
-                        primary_locations = list(usgs_flow_data['Site_Name'].unique())
-                    else:
-                        # Otherwise match to WQX locations
-                        primary_locations = list(data['Location_Name'].unique())
+                    primary_locations = list(usgs_sc_data['Site_Name'].unique())
                     
                     for idx, usgs_site_name in enumerate(usgs_flow_data['Site_Name'].unique()):
                         site_flow = usgs_flow_data[usgs_flow_data['Site_Name'] == usgs_site_name]
                         
-                        # Get the WQX site name for this USGS site
                         wqx_site_name = None
                         if USGS_MAPPING is not None:
                             usgs_site_num = site_flow['Site_Number'].iloc[0]
@@ -3667,20 +3652,14 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
                             if not mapping_match.empty:
                                 wqx_site_name = mapping_match.iloc[0]['WQX_Site_Name']
                         
-                        # Match color to the WQX site if it exists in primary data
                         if wqx_site_name and wqx_site_name in primary_locations:
                             color_idx = primary_locations.index(wqx_site_name)
                             line_color = primary_colors[color_idx % len(primary_colors)]
-                            print(f"  Matched USGS site '{usgs_site_name}' to WQX site '{wqx_site_name}' - using color {line_color}")
                         elif usgs_site_name in primary_locations:
-                            # Direct match by site name
                             color_idx = primary_locations.index(usgs_site_name)
                             line_color = primary_colors[color_idx % len(primary_colors)]
-                            print(f"  Direct match USGS site '{usgs_site_name}' - using color {line_color}")
                         else:
-                            # Fallback color if no match
                             line_color = '#00CED1'
-                            print(f"  No match for USGS site '{usgs_site_name}' - using default color")
                         
                         fig.add_trace(go.Scatter(
                             x=site_flow['Date'],
@@ -3689,7 +3668,7 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
                             name=f'{usgs_site_name} (USGS Flow)',
                             yaxis='y2',
                             showlegend=True,
-                            line=dict(width=2, color=line_color, dash='dash'),  # ← Using matched color
+                            line=dict(width=2, color=line_color, dash='dash'),
                             opacity=0.7,
                             legendgroup=f'{usgs_site_name}_usgs_flow',
                             hovertemplate='<b>%{fullData.name}</b><br>' +
@@ -3699,8 +3678,6 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
                         ))
             except Exception as e:
                 print(f"Error adding USGS flow data: {e}")
-                import traceback
-                traceback.print_exc()
         
         # Build title
         title = 'Specific Conductance (USGS Daily) Over Time'
@@ -3760,6 +3737,10 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
         fig.update_layout(**layout_config)
         return fig
     
+    # ========================================
+    # BRANCH 2: WQX Characteristics
+    # ========================================
+    
     # Convert "All" to None
     if characteristic == "All":
         characteristic = None
@@ -3772,19 +3753,6 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
 
     # Get WQX Data
     data = filter_data(CSU_df, characteristic, fraction, basin, site, sample_type, date_range[0], date_range[1])
-    
-    # ADD THIS DEBUG:
-    print(f"\n{'='*80}")
-    print(f"PLOT_DATA CALLBACK DEBUG")
-    print(f"{'='*80}")
-    print(f"Characteristic: {characteristic}")
-    print(f"Site(s): {site}")
-    print(f"Additional data toggles: {additional_data}")
-    print(f"HAS_USGS_DATA: {HAS_USGS_DATA}")
-    if HAS_USGS_DATA:
-        print(f"USGS_df size: {len(USGS_df)}")
-        print(f"USGS_MAPPING: {USGS_MAPPING is not None}")
-    print(f"{'='*80}\n")
 
     # Check if data is empty
     if data is None or data.empty:
@@ -3806,7 +3774,7 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
             title_font=dict(color='white')
         )
         return fig
-    
+        
     # If "All" characteristics selected, can't make a meaningful time series
     if characteristic is None:
         fig = go.Figure()
@@ -3836,7 +3804,7 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
     
     # Define color palette for primary data
     primary_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
-                      '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+                    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
     
     # Track if we need secondary y-axis
     has_secondary_axis = False
@@ -3854,9 +3822,9 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
             showlegend=True,  # Explicitly show legend
             marker=dict(size=8, opacity=0.8, color=primary_colors[idx % len(primary_colors)]),
             hovertemplate='<b>%{fullData.name}</b><br>' +
-                         'Date: %{x|%Y-%m-%d}<br>' +
-                         f'{characteristic}: %{{y:.2f}} {unit}<br>' +
-                         '<extra></extra>'
+                        'Date: %{x|%Y-%m-%d}<br>' +
+                        f'{characteristic}: %{{y:.2f}} {unit}<br>' +
+                        '<extra></extra>'
         ))
     
     # Check what additional data to add
@@ -3887,12 +3855,12 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
                             yaxis='y2',
                             showlegend=True,
                             marker=dict(size=10, symbol='diamond', opacity=0.8, 
-                                      color=primary_colors[color_idx % len(primary_colors)]),
+                                    color=primary_colors[color_idx % len(primary_colors)]),
                             legendgroup=f'{location}_wqx_flow',
                             hovertemplate='<b>%{fullData.name}</b><br>' +
-                                         'Date: %{x|%Y-%m-%d}<br>' +
-                                         'Flow: %{y:.2f} cfs<br>' +
-                                         '<extra></extra>'
+                                        'Date: %{x|%Y-%m-%d}<br>' +
+                                        'Flow: %{y:.2f} cfs<br>' +
+                                        '<extra></extra>'
                         ))
             except Exception as e:
                 print(f"Error adding WQX flow data: {e}")
