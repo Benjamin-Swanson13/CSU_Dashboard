@@ -597,23 +597,26 @@ CSU_df['Result_Measure'] = pd.to_numeric(CSU_df['Result_Measure'], errors='coerc
 # ADD MANUAL COORDINATE FOR "AT MOFFAT" SITE
 # This site has USGS data but no WQX data, so we add a dummy entry to give it coordinates
 if 'ARKANSAS RIVER AT MOFFAT STREET AT PUEBLO, CO' not in CSU_df['Location_Name'].values:
-    # Create a single dummy row with just the essential info
-    dummy_row = pd.DataFrame({
-        'Location_Name': ['ARKANSAS RIVER AT MOFFAT STREET AT PUEBLO, CO'],
-        'Location_LatitudeStandardized': [38.2536139630922],
-        'Location_LongitudeStandardized': [-104.606085372154],
-        'Activity_StartDate': [pd.NaT],
-        'Result_Measure': [np.nan],
-        'Result_Characteristic': [''],
-        'Result_SampleFraction': [''],
-        'Result_MeasureUnit': [''],
-        'Org_Identifier': ['USGS']
-    })
+    # Create a dictionary with all columns at once
+    dummy_data = {
+        'Location_Name': 'ARKANSAS RIVER AT MOFFAT STREET AT PUEBLO, CO',
+        'Location_LatitudeStandardized': 38.2536139630922,
+        'Location_LongitudeStandardized': -104.606085372154,
+        'Activity_StartDate': pd.NaT,
+        'Result_Measure': np.nan,
+        'Result_Characteristic': '',
+        'Result_SampleFraction': '',
+        'Result_MeasureUnit': '',
+        'Org_Identifier': 'USGS'
+    }
     
-    # Add any other columns that exist in CSU_df with default values
+    # Add all other columns with default values in one go
     for col in CSU_df.columns:
-        if col not in dummy_row.columns:
-            dummy_row[col] = ''
+        if col not in dummy_data:
+            dummy_data[col] = ''
+    
+    # Create DataFrame from complete dictionary (no fragmentation!)
+    dummy_row = pd.DataFrame([dummy_data])
     
     # Append to CSU_df
     CSU_df = pd.concat([CSU_df, dummy_row], ignore_index=True)
@@ -1139,8 +1142,11 @@ CSU_df_standardized, conversion_log = standardize_water_quality_units(CSU_df)
 
 # Usage: Apply to CSU_df
 print("\nOriginal data shape:", CSU_df.shape)
-
 print("Standardized data shape:", CSU_df_standardized.shape)
+
+# Defragment the DataFrame after all the unit conversions
+CSU_df_standardized = CSU_df_standardized.copy()
+print("✓ DataFrame defragmented")
 
 # Replace original dataframe
 CSU_df = CSU_df_standardized
