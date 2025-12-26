@@ -13,8 +13,8 @@ from dash import Dash, html, dcc, callback, Output, Input, dash_table, State
 import pandas as pd
 import geopandas as gpd
 from dash.dependencies import Input, Output, State
-from shapefile_functions import add_shapefile_data
-from WQXDataImport_CSU_251006_HF import WQXDataImport
+from util.shapefile_functions import add_shapefile_data
+from util.WQXDataImport_CSU_251006_HF import WQXDataImport
 import json
 import plotly.express as px
 from datetime import datetime
@@ -44,29 +44,30 @@ else:
 print("="*80 + "\n")
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
+asset_dir = os.path.join(script_dir, "assets")
+log_dir = os.path.join(script_dir.replace("src", ""), "log")
 print("WD identified as: " + script_dir)
 
-#call data import function
-user_input = input("Do you want to initiate a new data pull from WQX? (y/n): ").strip().lower()
+# For deployment - always use existing data
+print("Loading existing data file...")
 
-if user_input in ['y', 'yes']:
+filename_pattern = r"CSU_EPAWQData_Beta_19901001-(\d{8})_parsed.csv"
+existing_files = [f for f in os.listdir(asset_dir) if re.match(filename_pattern, f)]
 
-    print("Initiating new data pull from WQX...")
-    try:
-        parsed_csv = WQXDataImport()
-        print("WQX Import/Data Processing Complete, exported to " + parsed_csv  + ".")
-    except Exception as e:
-        print("function raised an error:", e)
-
-elif user_input not in ['n', 'no']:
-    print("Invalid input, exiting script...")
+if existing_files:
+    dates = [datetime.strptime(re.match(filename_pattern, f).group(1), "%Y%m%d") for f in existing_files]
+    most_recent_date = max(dates)
+    parsed_csv = f"CSU_EPAWQData_Beta_19901001-{most_recent_date.strftime('%Y%m%d')}_parsed.csv"
+    print(f"Using file: {parsed_csv}")
+else:
+    print("ERROR: No existing parsed CSV files found!")
     exit()
 
 print("Initializing, processing large amounts of data - this may take a minute...")
 
 filename_pattern = r"CSU_EPAWQData_Beta_19901001-(\d{8})_parsed.csv"
 
-existing_files = [f for f in os.listdir(script_dir) if re.match(filename_pattern, f)]
+existing_files = [f for f in os.listdir(asset_dir) if re.match(filename_pattern, f)]
 
 if existing_files:
     #extract dates and find most recent file
@@ -590,7 +591,7 @@ app.index_string = '''
 '''
 
 # Load WQX water quality data
-CSU_df = pd.read_csv(parsed_csv, dtype=str)
+CSU_df = pd.read_csv(os.path.join(asset_dir, parsed_csv), dtype=str)
 CSU_df['Activity_StartDate'] = pd.to_datetime(CSU_df['Activity_StartDate'], errors='coerce')
 CSU_df['Result_Measure'] = pd.to_numeric(CSU_df['Result_Measure'], errors='coerce')
 
@@ -709,7 +710,7 @@ if usgs_only:
 
 # Load Stream Miles mapping
 try:
-    stream_miles_df = pd.read_csv('StreamMiles.csv')
+    stream_miles_df = pd.read_csv('assets/StreamMiles.csv')
     print(f"✓ Loaded {len(stream_miles_df)} stream mile records")
     print(f"  Columns: {stream_miles_df.columns.tolist()}")
     
@@ -789,7 +790,7 @@ try:
     print("LOADING LAKES FROM GDB")
     print("="*80)
     
-    gdb_path = 'segmentation_2024.gdb'
+    gdb_path = 'assets/segmentation_2024.gdb'
     layer_name = 'Lakes2024Hammer'
     
     print(f"Loading layer: {layer_name}")
@@ -865,12 +866,12 @@ min_year = CSU_df['Activity_StartDate'].min().year
 max_year = CSU_df['Activity_StartDate'].max().year
 
 # Load Canals shp
-canals_gdf = gpd.read_file('Final_GIS_Canal_Layer.shp')
+canals_gdf = gpd.read_file('assets/Final_GIS_Canal_Layer.shp')
 canals_gdf = canals_gdf.to_crs('EPSG:4326')  # Reproject from NAD83 UTM Zone 13N to WGS84
 print(f"Loaded {len(canals_gdf)} canal features and reprojected to EPSG:4326")
 
 # Load exchange pts shp
-exchange_gdf = gpd.read_file('21CW3XXX_Pts.shp')
+exchange_gdf = gpd.read_file('assets/21CW3XXX_Pts.shp')
 exchange_gdf = exchange_gdf.to_crs('EPSG:4326')  # Reproject from NAD83 UTM Zone 13N to WGS84
 print(f"Loaded {len(exchange_gdf)} exchange features and reprojected to EPSG:4326")
 
@@ -879,7 +880,7 @@ try:
     print("\n" + "="*80)
     print("LOADING STREAMS SHAPEFILE")
     print("="*80)
-    streams_gdf = gpd.read_file('StreamsRivers.shp')
+    streams_gdf = gpd.read_file('assets/StreamsRivers.shp')
     print(f"✓ Loaded {len(streams_gdf)} stream/river features")
     print(f"  Original CRS: {streams_gdf.crs}")
     
@@ -1167,7 +1168,7 @@ print("\nUnit conversion log saved to 'unit_conversion_log.txt'")
 
 
 # Read HUC8 centroids for basin dropdown
-huc_centroids = pd.read_csv('HUC8_Centroids.csv')
+huc_centroids = pd.read_csv('assets/HUC8_Centroids.csv')
 
 huc_to_name = dict(zip(huc_centroids['huc8'], huc_centroids['name']))  
 name_to_huc = dict(zip(huc_centroids['name'], huc_centroids['huc8']))
@@ -1188,7 +1189,7 @@ SAMPLE_TYPES = ['All'] + sorted(CSU_df['Activity_MediaSubdivision'].dropna().uni
 SITES = ['All'] + sorted(CSU_df['Location_Name'].dropna().unique().tolist())
 
 print(f"Available sample types: {SAMPLE_TYPES}")
-BASINS_GDF = gpd.read_file('huc8_boundaries.geojson')
+BASINS_GDF = gpd.read_file('assets/huc8_boundaries.geojson')
 
 # Basin Centroids
 data_initial = [
@@ -1213,7 +1214,7 @@ data_initial = [
 ]
 
 # Code to convert .shp files into .geojson that can be added as mapbox layer
-with open('huc8_boundaries.geojson') as f:
+with open(os.path.join(asset_dir, 'huc8_boundaries.geojson')) as f:
     temp_file = json.load(f)
 
 layer = dict(
@@ -2419,6 +2420,17 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
     print(f"Debug: Selected canals = {selected_canals}")
     print(f"Debug: Selected characteristic = {characteristic}")
     
+    # Convert "All" to None for map logic
+    if characteristic == "All":
+        characteristic = None
+    if basin == "All":
+        basin = None
+    if sample_type == "All":
+        sample_type = None
+    
+    # ← ADD THIS DEBUG LINE
+    print(f"Debug: AFTER CONVERSION - basin = {basin}, characteristic = {characteristic}")
+
     selected_sites = []
     if site and site != 'All':
         if isinstance(site, str):
@@ -2430,14 +2442,14 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
     manual_toggle = map_display_options and 'show_labels' in map_display_options
     has_characteristic = characteristic and characteristic != "All"
     has_selected_sites = selected_sites and len(selected_sites) > 0  
-    show_labels = has_characteristic or manual_toggle or has_selected_sites  
+    show_labels = has_characteristic or manual_toggle or has_selected_sites 
     
     print(f"Debug: Characteristic selected = {has_characteristic}")
     print(f"Debug: Manual toggle = {manual_toggle}")
     print(f"Debug: Show labels = {show_labels}")
 
     # Load basin data
-    basin_df = gpd.read_file('huc8_boundaries.geojson')
+    basin_df = gpd.read_file('assets/huc8_boundaries.geojson')
     
     # Find the correct basin column name in the GeoJSON
     basin_col = None
@@ -3191,8 +3203,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
     
     # BRANCH 3: No characteristic/basin selected - show all sites
     else:
-        print("Debug: No characteristic or basin selected")
-        
+                
         all_wqx_sites = CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates()
         all_wqx_sites['Location_LatitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LatitudeStandardized'], errors='coerce')
         all_wqx_sites['Location_LongitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LongitudeStandardized'], errors='coerce')
@@ -3229,20 +3240,32 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 showlegend=False
             ))
             
+            # Add markers without text
             data.append(dict(
                 lat=selected_df['Location_LatitudeStandardized'].tolist(),
                 lon=selected_df['Location_LongitudeStandardized'].tolist(),
                 type='scattermapbox',
-                mode='markers+text' if show_labels else 'markers',
-                text=selected_df['Location_Name'].tolist() if show_labels else None,
-                textposition='top center' if show_labels else None,
-                textfont=dict(size=14, color='black', family='Arial Black') if show_labels else None,
+                mode='markers',
                 hovertext=[f"{name}<br>{'(USGS Site)' if is_usgs else '(WQX Site)'}" 
                         for name, is_usgs in zip(selected_df['Location_Name'], selected_df['is_usgs'])],
                 marker=dict(size=15, color='#00CED1', opacity=1),
                 name='Selected Sites',
                 showlegend=True
             ))
+
+            # Add labels as annotations if show_labels is True
+            if show_labels:
+                for _, row in selected_df.iterrows():
+                    data.append(dict(
+                        type='scattermapbox',
+                        lon=[row['Location_LongitudeStandardized']],
+                        lat=[row['Location_LatitudeStandardized']],
+                        mode='text',
+                        text=[row['Location_Name']],
+                        textfont=dict(size=12, color='yellow', family='Arial Black'),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
         else:
             print(f"Debug: Showing all sites (WQX: {len(all_wqx_sites)}, USGS: {len(all_usgs_sites)})")
             
@@ -3250,6 +3273,10 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 lat=all_wqx_sites['Location_LatitudeStandardized'].tolist(),
                 lon=all_wqx_sites['Location_LongitudeStandardized'].tolist(),
                 type='scattermapbox',
+                mode='markers+text' if show_labels else 'markers',
+                text=all_wqx_sites['Location_Name'].tolist() if show_labels else None,
+                textposition='top center' if show_labels else None,
+                textfont=dict(size=14, color='white', family='Arial Black') if show_labels else None,
                 hovertext=all_wqx_sites['Location_Name'].tolist(),
                 marker=dict(size=5, color='blue', opacity=0.7),
                 name='WQX Sites',
@@ -3261,6 +3288,10 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                     lat=all_usgs_sites['Location_LatitudeStandardized'].tolist(),
                     lon=all_usgs_sites['Location_LongitudeStandardized'].tolist(),
                     type='scattermapbox',
+                    mode='markers+text' if show_labels else 'markers',
+                    text=all_usgs_sites['Location_Name'].tolist() if show_labels else None,
+                    textposition='top center' if show_labels else None,
+                    textfont=dict(size=14, color='white', family='Arial Black') if show_labels else None,
                     hovertext=[f"{name}<br>(USGS Site)" for name in all_usgs_sites['Location_Name']],
                     marker=dict(size=7, color='#00CED1', opacity=0.8),
                     name='USGS Sites',
@@ -3300,6 +3331,40 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
         ),
         uirevision='constant'
     )
+
+    # Add text labels for selected sites
+    if show_labels and selected_sites:
+        print(f"Debug: Creating text labels for {len(selected_sites)} sites")
+        
+        # Get coordinates for selected sites
+        all_sites_coords = CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates()
+        
+        for site_name in selected_sites:
+            site_row = all_sites_coords[all_sites_coords['Location_Name'] == site_name]
+            if not site_row.empty:
+                lat = float(site_row.iloc[0]['Location_LatitudeStandardized'])
+                lon = float(site_row.iloc[0]['Location_LongitudeStandardized'])
+                
+                # Offset the label slightly above the marker
+                lat_offset = lat + 0.02  # Move label up
+                
+                # Add text trace with very visible styling
+                data.append(dict(
+                    type='scattermapbox',
+                    lon=[lon],
+                    lat=[lat_offset],
+                    mode='markers+text',  # Use both to ensure it renders
+                    marker=dict(size=1, color='rgba(0,0,0,0)'),  # Invisible marker
+                    text=site_name,
+                    textfont=dict(
+                        size=16, 
+                        color='#FFFF00',  # Bright yellow
+                        family='Arial Black'
+                    ),
+                    showlegend=False,
+                    hoverinfo='skip'
+                ))
+                print(f"Debug: Added label for {site_name} at ({lat_offset}, {lon})")
 
     fig = dict(data=data, layout=layout)
     return fig

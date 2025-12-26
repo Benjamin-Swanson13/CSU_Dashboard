@@ -1,0 +1,11 @@
+Water Quality Unit Conversion Log
+========================================
+
+pH: 1154 records standardized to 'std units'
+Flow: 460 records renamed ft3/s -> cfs
+Flow: 498 records converted from m3/sec to cfs
+
+
+Preserved Units (Different Analytical Methods):
+- E. coli: MPN/100mL, CFU/100mL, #/100mL
+- Turbidity: NTU, FNU, NTRU
