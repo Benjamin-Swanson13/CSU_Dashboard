@@ -14,7 +14,7 @@ import pandas as pd
 import geopandas as gpd
 from dash.dependencies import Input, Output, State
 from util.shapefile_functions import add_shapefile_data
-from util.WQXDataImport_CSU_251006_HF import WQXDataImport
+from util.data_import import WQXDataImport
 import json
 import plotly.express as px
 from datetime import datetime
@@ -27,9 +27,22 @@ import pandas as pd
 import numpy as np
 import glob
 import fiona
+import base64
+
+def get_icon_url(icon_path):
+    with open(icon_path, 'rb') as f:
+        encoded = base64.b64encode(f.read()).decode()
+    return f"data:image/svg+xml;base64,{encoded}"
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+asset_dir = os.path.join(script_dir, "assets")
+log_dir = os.path.join(script_dir.replace("src", ""), "log")
+print("WD identified as: " + script_dir)
+
+print("="*80 + "\n")
 
 # Try to find USGS files
-usgs_files = glob.glob("USGS_DailyData_Arkansas_*.csv")
+usgs_files = glob.glob(os.path.join(script_dir, "assets", "USGS_DailyData_Arkansas_*.csv"))
 print(f"Found USGS files: {usgs_files}")
 
 if usgs_files:
@@ -38,17 +51,31 @@ else:
     print("✗ No files found - checking if path issue...")
     # Try with full path
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    usgs_files_fullpath = glob.glob(os.path.join(script_dir, "USGS_DailyData_Arkansas_*.csv"))
+    usgs_files_fullpath = glob.glob(os.path.join(script_dir, "assets", "USGS_DailyData_Arkansas_*.csv"))
     print(f"Checking in script dir: {usgs_files_fullpath}")
 
-print("="*80 + "\n")
-
-script_dir = os.path.dirname(os.path.abspath(__file__))
-asset_dir = os.path.join(script_dir, "assets")
-log_dir = os.path.join(script_dir.replace("src", ""), "log")
-print("WD identified as: " + script_dir)
-
 # For deployment - always use existing data
+# User input disabled for deployment
+"""
+#call data import function
+user_input = input("Do you want to initiate a new data pull from WQX? (y/n): ").strip().lower()
+
+if user_input in ['y', 'yes']:
+
+    print("Initiating new data pull from WQX...")
+    try:
+        parsed_csv = WQXDataImport()
+        print("WQX Import/Data Processing Complete, exported to " + parsed_csv  + ".")
+    except Exception as e:
+        print("function raised an error:", e)
+
+elif user_input not in ['n', 'no']:
+    print("Invalid input, exiting script...")
+    exit()
+
+print("Initializing, processing large amounts of data - this may take a minute...")
+"""
+
 print("Loading existing data file...")
 
 filename_pattern = r"CSU_EPAWQData_Beta_19901001-(\d{8})_parsed.csv"
@@ -627,7 +654,7 @@ print("Loading USGS daily data...")
 try:
     # Find most recent USGS file
     import glob
-    usgs_files = glob.glob("USGS_DailyData_Arkansas_*.csv")
+    usgs_files = glob.glob(os.path.join(script_dir, "assets", "USGS_DailyData_Arkansas_*.csv"))
     usgs_files = [f for f in usgs_files if 'SiteMapping' not in f]
 
     print(f"  Found {len(usgs_files)} USGS data file(s): {usgs_files}")
@@ -790,7 +817,7 @@ try:
     print("LOADING LAKES FROM GDB")
     print("="*80)
     
-    gdb_path = 'assets/segmentation_2024.gdb'
+    gdb_path = 'segmentation_2024.gdb'
     layer_name = 'Lakes2024Hammer'
     
     print(f"Loading layer: {layer_name}")
@@ -914,9 +941,9 @@ except Exception as e:
 exchange_gdf['Color'] = pd.to_numeric(exchange_gdf['Color'], errors='coerce').astype('Int64')
 print(f"Converted Color column to numeric. Values: {exchange_gdf['Color'].unique()}")
 
-# Filter to only Color 2 and 3
-exchange_gdf = exchange_gdf[exchange_gdf['Color'].isin([2, 3])]
-print(f"Filtered to {len(exchange_gdf)} exchange features (Color 2 and 3 only)")
+# Filter to only Color 1 and 3
+exchange_gdf = exchange_gdf[exchange_gdf['Color'].isin([1, 3])]
+print(f"Filtered to {len(exchange_gdf)} exchange features (Color 1 and 3 only)")
 
 # Global units mapping - used throughout the dashboard
 UNITS_MAP = {
@@ -1475,16 +1502,30 @@ app.layout = html.Div(
                                         style={'margin-bottom': '20px'}
                                     )
                                 ], style={'margin-bottom': '15px'}),
-                                # STRUCTURES (Exchange Points)
+                                # Exchange-TO-Location (Color 1)
                                 html.Div([
-                                    html.Label('Exchange Points:', 
+                                    html.Label('Exchange-to-Location:', 
                                             style={'color': '#ffffff', 'font-weight': 'bold', 'margin-bottom': '8px', 'display': 'block'}),
                                     dcc.Dropdown(
-                                        id='exchange-select',
+                                        id='exchange-to-select',
                                         options=[],
                                         value=[],
                                         multi=True,
-                                        placeholder='Select exchange points to display (or leave empty for none)...',
+                                        placeholder='Select exchange-to points to display (or leave empty for none)...',
+                                        style={'margin-bottom': '20px'}
+                                    )
+                                ], style={'margin-bottom': '15px'}),
+
+                                # Exchange-FROM-Location (Color 3)
+                                html.Div([
+                                    html.Label('Exchange-from-Location:', 
+                                            style={'color': '#ffffff', 'font-weight': 'bold', 'margin-bottom': '8px', 'display': 'block'}),
+                                    dcc.Dropdown(
+                                        id='exchange-from-select',
+                                        options=[],
+                                        value=[],
+                                        multi=True,
+                                        placeholder='Select exchange-from points to display (or leave empty for none)...',
                                         style={'margin-bottom': '20px'}
                                     )
                                 ], style={'margin-bottom': '15px'}),
@@ -2310,19 +2351,22 @@ def update_canal_dropdown(basin):
         print("=== CANAL DROPDOWN UPDATE FAILED ===\n")
         return [{'label': 'Error loading canals', 'value': 'error', 'disabled': True}]
 
-# Callback to populate exchange points dropdown based on selected basin
+# Callback to populate exchange-TO dropdown (Color 1)
 @app.callback(
-    Output('exchange-select', 'options'),
+    Output('exchange-to-select', 'options'),
     [Input('basin-select', 'value')]
 )
-def update_exchange_dropdown(basin):
-    print(f"\n=== UPDATE EXCHANGE DROPDOWN CALLED ===")
+def update_exchange_to_dropdown(basin):
+    print(f"\n=== UPDATE EXCHANGE-TO DROPDOWN CALLED ===")
     print(f"Basin selected: {basin}")
     
     try:
+        # Filter to Color 1 only
+        exchange_color1 = exchange_gdf[exchange_gdf['Color'] == 1].copy()
+        
         # If a specific basin is selected, filter exchange points to that basin
         if basin and basin != 'All':
-            print(f"Filtering exchange points for basin: {basin}")
+            print(f"Filtering exchange-to points for basin: {basin}")
 
             # Find the basin column
             basin_col = None
@@ -2335,68 +2379,110 @@ def update_exchange_dropdown(basin):
                 basin_geom_gdf = BASINS_GDF[BASINS_GDF[basin_col] == basin]
                 
                 if not basin_geom_gdf.empty:
-                    # Reproject to UTM for proper distance operations
                     basin_projected = basin_geom_gdf.to_crs('EPSG:26913')
-                    exchange_projected = exchange_gdf.to_crs('EPSG:26913')  
+                    exchange_projected = exchange_color1.to_crs('EPSG:26913')  
                     
                     basin_union = basin_projected.geometry.iloc[0]
                     basin_buffered = basin_union.buffer(100)
 
                     exchange_filtered = exchange_projected[exchange_projected.geometry.intersects(basin_buffered)]  
-                    print(f"✓ Found {len(exchange_filtered)} exchange points in basin '{basin}'")
+                    print(f"✓ Found {len(exchange_filtered)} exchange-to points in basin '{basin}'")
                 else:
-                    exchange_filtered = exchange_gdf
-                    print(f"Basin geometry empty, using all exchange points")
+                    exchange_filtered = exchange_color1
             else:
-                exchange_filtered = exchange_gdf
-                print(f"No basin column found, using all exchange points")
+                exchange_filtered = exchange_color1
         else:
-            # No basin selected - show all structures within HUC8 boundaries
-            print("No specific basin selected, showing all exchange points in HUC8 boundaries")
+            # Show all Color 1 structures within HUC8 boundaries
             basins_projected = BASINS_GDF.to_crs('EPSG:26913')
-            exchange_projected = exchange_gdf.to_crs('EPSG:26913')
+            exchange_projected = exchange_color1.to_crs('EPSG:26913')
             
             huc8_union = basins_projected.geometry.union_all()
             huc8_buffered = huc8_union.buffer(500)
             exchange_filtered = exchange_projected[exchange_projected.geometry.intersects(huc8_buffered)]
-            print(f"✓ Found {len(exchange_filtered)} exchange points in all basins")
+            print(f"✓ Found {len(exchange_filtered)} exchange-to points in all basins")
         
-        # Check if any exchange points were found
         if len(exchange_filtered) == 0:
-            print("❌ No exchange points found in selected basin")
-            return [{'label': 'No exchange points in selected basin', 'value': 'none', 'disabled': True}]
+            return [{'label': 'No exchange-to points in selected basin', 'value': 'none', 'disabled': True}]
         
-        # Create options grouped by Color (type)
-        options = [{'label': 'All Exchange Points', 'value': 'All'}]
+        options = [{'label': 'All Exchange-to Points', 'value': 'All'}]
+        for _, row in exchange_filtered.iterrows():
+            label = row['Label'] if 'Label' in row and pd.notna(row['Label']) else f"Exchange Point {row.name}"
+            options.append({'label': label, 'value': f"color1_{row.name}"})
 
-        # Add Color 2 
-        color2 = exchange_filtered[exchange_filtered['Color'] == 2]
-        print(f"Color 2 count: {len(color2)}")
-        if len(color2) > 0:
-            options.append({'label': '--- Substitute Supply Release ---', 'value': 'header_color2', 'disabled': True})
-            for _, row in color2.iterrows():
-                label = row['Label'] if 'Label' in row and pd.notna(row['Label']) else f"Exchange Point {row.name}"
-                options.append({'label': f"  {label}", 'value': f"color2_{row.name}"})
-        
-        # Add Color 3 
-        color3 = exchange_filtered[exchange_filtered['Color'] == 3]
-        print(f"Color 3 count: {len(color3)}")
-        if len(color3) > 0:
-            options.append({'label': '--- Exchange-from-Location ---', 'value': 'header_color3', 'disabled': True})
-            for _, row in color3.iterrows():
-                label = row['Label'] if 'Label' in row and pd.notna(row['Label']) else f"Exchange Point {row.name}"
-                options.append({'label': f"  {label}", 'value': f"color3_{row.name}"})
-
-        print(f"✓ Returning {len(options)-1} exchange point options")
-        print("=== EXCHANGE POINT DROPDOWN UPDATE COMPLETE ===\n")
-
+        print(f"✓ Returning {len(options)-1} exchange-to options")
         return options
         
     except Exception as e:
-        print(f"❌ ERROR populating exchange point dropdown: {e}")
+        print(f"❌ ERROR populating exchange-to dropdown: {e}")
         import traceback
         traceback.print_exc()
-        return [{'label': 'All Exchange Points', 'value': 'All'}]
+        return [{'label': 'All Exchange-to Points', 'value': 'All'}]
+
+# Callback to populate exchange-FROM dropdown (Color 3)
+@app.callback(
+    Output('exchange-from-select', 'options'),
+    [Input('basin-select', 'value')]
+)
+def update_exchange_from_dropdown(basin):
+    print(f"\n=== UPDATE EXCHANGE-FROM DROPDOWN CALLED ===")
+    print(f"Basin selected: {basin}")
+    
+    try:
+        # Filter to Color 3 only
+        exchange_color3 = exchange_gdf[exchange_gdf['Color'] == 3].copy()
+        
+        # If a specific basin is selected, filter exchange points to that basin
+        if basin and basin != 'All':
+            print(f"Filtering exchange-from points for basin: {basin}")
+
+            basin_col = None
+            for col in ['name', 'NAME', 'BASINS', 'BASIN_NAM', 'NAMELSAD']:
+                if col in BASINS_GDF.columns:
+                    basin_col = col
+                    break
+            
+            if basin_col:
+                basin_geom_gdf = BASINS_GDF[BASINS_GDF[basin_col] == basin]
+                
+                if not basin_geom_gdf.empty:
+                    basin_projected = basin_geom_gdf.to_crs('EPSG:26913')
+                    exchange_projected = exchange_color3.to_crs('EPSG:26913')  
+                    
+                    basin_union = basin_projected.geometry.iloc[0]
+                    basin_buffered = basin_union.buffer(100)
+
+                    exchange_filtered = exchange_projected[exchange_projected.geometry.intersects(basin_buffered)]  
+                    print(f"✓ Found {len(exchange_filtered)} exchange-from points in basin '{basin}'")
+                else:
+                    exchange_filtered = exchange_color3
+            else:
+                exchange_filtered = exchange_color3
+        else:
+            # Show all Color 3 structures within HUC8 boundaries
+            basins_projected = BASINS_GDF.to_crs('EPSG:26913')
+            exchange_projected = exchange_color3.to_crs('EPSG:26913')
+            
+            huc8_union = basins_projected.geometry.union_all()
+            huc8_buffered = huc8_union.buffer(500)
+            exchange_filtered = exchange_projected[exchange_projected.geometry.intersects(huc8_buffered)]
+            print(f"✓ Found {len(exchange_filtered)} exchange-from points in all basins")
+        
+        if len(exchange_filtered) == 0:
+            return [{'label': 'No exchange-from points in selected basin', 'value': 'none', 'disabled': True}]
+        
+        options = [{'label': 'All Exchange-from Points', 'value': 'All'}]
+        for _, row in exchange_filtered.iterrows():
+            label = row['Label'] if 'Label' in row and pd.notna(row['Label']) else f"Exchange Point {row.name}"
+            options.append({'label': label, 'value': f"color3_{row.name}"})
+
+        print(f"✓ Returning {len(options)-1} exchange-from options")
+        return options
+        
+    except Exception as e:
+        print(f"❌ ERROR populating exchange-from dropdown: {e}")
+        import traceback
+        traceback.print_exc()
+        return [{'label': 'All Exchange-from Points', 'value': 'All'}]
 
 # BASIN DROPDOWN AND MAP HIGHLIGHTING
 @app.callback(
@@ -2406,7 +2492,8 @@ def update_exchange_dropdown(basin):
      Input('basin-select', 'value'),
      Input('site-select', 'value'),
      Input('canal-select', 'value'),
-     Input('exchange-select', 'value'),
+     Input('exchange-to-select', 'value'),      
+     Input('exchange-from-select', 'value'),
      Input('rivers-toggle', 'value'),
      Input('additional-layers-toggle', 'value'),
      Input('map-display-options', 'value'),
@@ -2415,7 +2502,7 @@ def update_exchange_dropdown(basin):
     ]
 )
 
-def highlight_basin(characteristic, fraction, basin, site, selected_canals, selected_exchange, rivers_toggle, additional_layers, map_display_options, sample_type, date_range):
+def highlight_basin(characteristic, fraction, basin, site, selected_canals, selected_exchange_to, selected_exchange_from, rivers_toggle, additional_layers, map_display_options, sample_type, date_range):
     print(f"Debug: Selected basin = {basin}")
     print(f"Debug: Selected canals = {selected_canals}")
     print(f"Debug: Selected characteristic = {characteristic}")
@@ -2544,12 +2631,12 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             has_usgs_sites = any(s in usgs_site_names for s in selected_sites)
 
     # ===================================================================
-    # INITIALIZE DATA LIST - ONLY HAPPENS ONCE!
+    # INITIALIZE DATA LIST 
     # ===================================================================
     data = []
 
     # ===================================================================
-    # ADD BACKGROUND LAYERS (THESE GO FIRST - WILL BE AT BOTTOM)
+    # ADD BACKGROUND LAYERS 
     # ===================================================================
     
     # Add canals/ditches if any are selected
@@ -2659,10 +2746,9 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             traceback.print_exc()
 
     # Add exchange points if any are selected
-    if selected_exchange:
+    if selected_exchange_to or selected_exchange_from:
         try:
-            show_all_exchange = 'All' in selected_exchange
-
+            # Determine basin filtering
             if basin and basin != 'All':
                 basin_col = None
                 for col in ['name', 'NAME', 'BASINS', 'BASIN_NAM', 'NAMELSAD']:
@@ -2691,43 +2777,68 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             
             exchange_to_show = exchange_in_basin.to_crs('EPSG:4326')
 
-            if not show_all_exchange:
-                selected_indices = []
-                for sel in selected_exchange:
-                    if sel.startswith('color2_') or sel.startswith('color3_'):
-                        idx = int(sel.split('_')[1])
-                        selected_indices.append(idx)
-                exchange_to_show = exchange_to_show.loc[exchange_to_show.index.isin(selected_indices)]
+            # Handle Exchange-TO (Color 1)
+            if selected_exchange_to:
+                show_all_to = 'All' in selected_exchange_to
+                color1_structures = exchange_to_show[exchange_to_show['Color'] == 1]
+                
+                if not show_all_to and selected_exchange_to:
+                    selected_indices = []
+                    for sel in selected_exchange_to:
+                        if sel.startswith('color1_'):
+                            idx = int(sel.split('_')[1])
+                            selected_indices.append(idx)
+                    color1_structures = color1_structures.loc[color1_structures.index.isin(selected_indices)]
 
-            color2_structures = exchange_to_show[exchange_to_show['Color'] == 2]
-            color3_structures = exchange_to_show[exchange_to_show['Color'] == 3]
+                if len(color1_structures) > 0:
+                    data.append(dict(
+                        lat=[geom.y for geom in color1_structures.geometry],
+                        lon=[geom.x for geom in color1_structures.geometry],
+                        type='scattermapbox',
+                        mode='markers',
+                        marker=dict(
+                            size=14, 
+                            color="#D11B51",
+                            symbol="star",
+                            line=dict(color="#D11B51", width=2)
+                        ),
+                        text=color1_structures['Label'].tolist(),
+                        hovertemplate='<b>★ %{text}</b><br>Exchange-to-Location<extra></extra>',
+                        name='★ Exchange-to-Location',
+                        showlegend=True
+                    ))
 
-            if len(color2_structures) > 0:
-                data.append(dict(
-                    lat=[geom.y for geom in color2_structures.geometry],
-                    lon=[geom.x for geom in color2_structures.geometry],
-                    type='scattermapbox',
-                    mode='markers',
-                    marker=dict(size=16, color="#470953", symbol='circle'),
-                    text=color2_structures['Label'].tolist(),
-                    hovertemplate='<b>▲ %{text}</b><br>Substitute Supply Release<extra></extra>',
-                    name='▲ Substitute Supply Release',
-                    showlegend=True
-                ))
+            # Handle Exchange-FROM (Color 3)
+            if selected_exchange_from:
+                show_all_from = 'All' in selected_exchange_from
+                color3_structures = exchange_to_show[exchange_to_show['Color'] == 3]
+                
+                if not show_all_from and selected_exchange_from:
+                    selected_indices = []
+                    for sel in selected_exchange_from:
+                        if sel.startswith('color3_'):
+                            idx = int(sel.split('_')[1])
+                            selected_indices.append(idx)
+                    color3_structures = color3_structures.loc[color3_structures.index.isin(selected_indices)]
 
-            if len(color3_structures) > 0:
-                data.append(dict(
-                    lat=[geom.y for geom in color3_structures.geometry],
-                    lon=[geom.x for geom in color3_structures.geometry],
-                    type='scattermapbox',
-                    mode='markers',
-                    marker=dict(size=16, color='#D946EF', symbol='circle'),
-                    text=color3_structures['Label'].tolist(),
-                    hovertemplate='<b>● %{text}</b><br>Exchange-from-Location<extra></extra>',
-                    name='● Exchange-from-Location',
-                    showlegend=True
-                ))
-            
+                if len(color3_structures) > 0:
+                    data.append(dict(
+                        lat=[geom.y for geom in color3_structures.geometry],
+                        lon=[geom.x for geom in color3_structures.geometry],
+                        type='scattermapbox',
+                        mode='markers',
+                        marker=dict(
+                            size=14, 
+                            color="#F59211",
+                            symbol="star",
+                            line=dict(color='black', width=5)
+                        ),
+                        text=color3_structures['Label'].tolist(),
+                        hovertemplate='<b>★ %{text}</b><br>Exchange-from-Location<extra></extra>',
+                        name='★ Exchange-from-Location',
+                        showlegend=True
+                    ))
+                
         except Exception as e:
             print(f"ERROR adding exchange points: {e}")
             import traceback
@@ -3050,7 +3161,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                     lon=non_selected['Location_LongitudeStandardized'].tolist(),
                     type='scattermapbox',
                     hovertext=non_selected['Location_Name'].tolist(),
-                    marker=dict(size=5, color='grey', opacity=0.5),
+                    marker=dict(size=5, color='grey', opacity=0.1),
                     name='Other Stations',
                     showlegend=False
                 ))
@@ -3077,7 +3188,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                     lon=CSU_df['Location_LongitudeStandardized'],
                     type='scattermapbox',
                     hovertext=CSU_df['Location_Name'],
-                    marker=dict(size=5, color='grey', opacity=0.5),
+                    marker=dict(size=5, color='grey', opacity=0.1),
                     name='No Data Available',
                     showlegend=False
                 ))
@@ -3108,7 +3219,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                     lon=non_selected['Location_LongitudeStandardized'],
                     type='scattermapbox',
                     hovertext=non_selected['Location_Name'],
-                    marker=dict(size=5, color='grey', opacity=0.5),
+                    marker=dict(size=5, color='grey', opacity=0.1),
                     name='Other Stations',
                     showlegend=False
                 ))
@@ -3166,7 +3277,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                                 lon=all_usgs['Longitude'].tolist(),
                                 type='scattermapbox',
                                 hovertext=[f"{name}<br>(USGS Site)" for name in all_usgs['WQX_Site_Name']],
-                                marker=dict(size=7, color='#00CED1', opacity=0.8),
+                                marker=dict(size=12, color='#00CED1', opacity=0.8),
                                 name='USGS Sites',
                                 showlegend=True
                             ))
@@ -3176,7 +3287,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                     lon=CSU_df['Location_LongitudeStandardized'],
                     type='scattermapbox',
                     hovertext=CSU_df['Location_Name'],
-                    marker=dict(size=5, color='grey', opacity=0.5),
+                    marker=dict(size=8, color='grey', opacity=0.1),
                     name='No Data Available',
                     showlegend=False
                 ))
@@ -3235,7 +3346,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 lon=non_selected_df['Location_LongitudeStandardized'].tolist(),
                 type='scattermapbox',
                 hovertext=non_selected_df['Location_Name'].tolist(),
-                marker=dict(size=5, color='grey', opacity=0.5),
+                marker=dict(size=10, color='grey', opacity=0.1),
                 name='Other Stations',
                 showlegend=False
             ))
@@ -3278,7 +3389,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 textposition='top center' if show_labels else None,
                 textfont=dict(size=14, color='white', family='Arial Black') if show_labels else None,
                 hovertext=all_wqx_sites['Location_Name'].tolist(),
-                marker=dict(size=5, color='blue', opacity=0.7),
+                marker=dict(size=12, color='blue', opacity=0.7),
                 name='WQX Sites',
                 showlegend=True
             ))
