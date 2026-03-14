@@ -106,7 +106,7 @@ def import_arkansas_river_usgs_data():
         '07099970': 'Arkansas River at Moffat Street at Pueblo, CO',
         '07099971': 'Arkansas River Below Moffat Street at Pueblo, CO',
         '07099400': 'Arkansas River above Pueblo, CO',
-        '07099969': 'Arkansas R. at ST Charles Mesa Diver. at Pueblo,co',
+        '07099969': 'Arkansas R. at ST Charles Mesa Diver. at Pueblo, CO',
         '07109500': 'Arkansas River near Avondale, CO',
         '07124000': 'Arkansas River at Las Animas, CO',
         '07120500': 'Arkansas River near Rocky Ford, CO',

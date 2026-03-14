@@ -1,0 +1,5 @@
+Sample Fraction Conversion Log
+========================================
+
+'Filtered, field' → 'Dissolved': 192 records
+'Unfiltered' → 'Total': 62865 records

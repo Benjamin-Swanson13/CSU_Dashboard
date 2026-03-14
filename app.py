@@ -715,12 +715,45 @@ except Exception as e:
     USGS_MAPPING = None
     print(f"⚠ Error loading USGS data: {e}")
 
+#Load Fountain Creek E coli data
+try:
+    fountain_creek_df = pd.read_csv(os.path.join(asset_dir, 'USGSFountainCreek_Ecoli.csv'))
+    print(f"✓ Loaded {len(fountain_creek_df)} Fountain Creek E coli records")
+except FileNotFoundError:
+    fountain_creek_df = pd.DataFrame()
+    print("⚠ FountainCreek_Ecoli.csv not found")
+except Exception as e:
+    fountain_creek_df = pd.DataFrame()
+    print(f"⚠ Error loading Fountain Creek E coli data: {e}")
+
+if not fountain_creek_df.empty:
+    # Ensure date and numeric columns match CSU_df types
+    fountain_creek_df['Activity_StartDate'] = pd.to_datetime(
+        fountain_creek_df['Activity_StartDate'], errors='coerce'
+    )
+    fountain_creek_df['Result_Measure'] = pd.to_numeric(
+        fountain_creek_df['Result_Measure'], errors='coerce'
+    )
+    
+    # Add any missing columns that CSU_df has
+    for col in CSU_df.columns:
+        if col not in fountain_creek_df.columns:
+            fountain_creek_df[col] = ''
+    
+    # Concat into main dataframe
+    CSU_df = pd.concat(
+        [CSU_df, fountain_creek_df[CSU_df.columns]],  # enforce column alignment
+        ignore_index=True
+    )
+    print(f"✓ Merged Fountain Creek data into CSU_df ({len(fountain_creek_df)} records)")
+
 # Create unified site list from both WQX and USGS data
 print("\nCreating unified site list...")
 wqx_sites = set(CSU_df['Location_Name'].dropna().unique())
 usgs_sites = set(USGS_df['Site_Name'].dropna().unique()) if HAS_USGS_DATA else set()
+fountain_creek = set(fountain_creek_df['Location_Name'].dropna().unique())
 
-ALL_SITES = sorted(list(wqx_sites | usgs_sites))  # Union of both sets
+ALL_SITES = sorted(list(wqx_sites | usgs_sites | fountain_creek))  # Union of all sets
 
 print(f"  WQX sites: {len(wqx_sites)}")
 print(f"  USGS sites: {len(usgs_sites)}")
@@ -942,8 +975,8 @@ exchange_gdf['Color'] = pd.to_numeric(exchange_gdf['Color'], errors='coerce').as
 print(f"Converted Color column to numeric. Values: {exchange_gdf['Color'].unique()}")
 
 # Filter to only Color 1 and 3
-exchange_gdf = exchange_gdf[exchange_gdf['Color'].isin([1, 3])]
-print(f"Filtered to {len(exchange_gdf)} exchange features (Color 1 and 3 only)")
+exchange_gdf = exchange_gdf[exchange_gdf['Color'].isin([1, 2, 3])]
+print(f"Filtered to {len(exchange_gdf)} exchange features (Color 1, 2 and 3 only)")
 
 # Global units mapping - used throughout the dashboard
 UNITS_MAP = {
@@ -1164,6 +1197,79 @@ def standardize_water_quality_units(df):
     print("  - Turbidity: NTU, FNU, NTRU (different optical measurement principles)")
     
     return df_standardized, conversions_made
+
+def standardize_sample_fractions(df):
+    """
+    Standardize sample fraction naming for consistency
+    """
+    print("\n=== STARTING SAMPLE FRACTION STANDARDIZATION ===\n")
+    
+    # Create a copy to avoid modifying original
+    df_standardized = df.copy()
+    
+    # Track conversions
+    conversions_made = []
+    
+    # Mapping of variations to standard terms
+    fraction_mapping = {
+        # Filtered variations → Dissolved
+        'Filtered, field': 'Dissolved',
+        'Filtered, lab': 'Dissolved',
+        'Filtered': 'Dissolved',
+        'filtered, field': 'Dissolved',
+        'filtered, lab': 'Dissolved',
+        'filtered': 'Dissolved',
+        
+        # Unfiltered variations → Total
+        'Unfiltered': 'Total',
+        'unfiltered': 'Total',
+        'Unfiltered, field': 'Total',
+        'unfiltered, field': 'Total',
+        
+        # Total variations (keep as Total)
+        'total': 'Total',
+        'TOTAL': 'Total',
+        
+        # Dissolved variations (keep as Dissolved)
+        'dissolved': 'Dissolved',
+        'DISSOLVED': 'Dissolved'
+    }
+    
+    # Apply the mapping
+    for old_value, new_value in fraction_mapping.items():
+        mask = df_standardized['Result_SampleFraction'] == old_value
+        if mask.any():
+            count = mask.sum()
+            df_standardized.loc[mask, 'Result_SampleFraction'] = new_value
+            conversions_made.append(f"'{old_value}' → '{new_value}': {count} records")
+            print(f"Converted {count} records: '{old_value}' → '{new_value}'")
+    
+    print(f"\n=== SAMPLE FRACTION STANDARDIZATION COMPLETE ===")
+    print(f"Total conversions made: {len(conversions_made)}")
+    
+    return df_standardized, conversions_made
+
+# Apply sample fraction standardization
+CSU_df_frac_standardized, fraction_conversion_log = standardize_sample_fractions(CSU_df)
+
+print("\nOriginal data shape:", CSU_df.shape)
+print("Standardized data shape:", CSU_df_frac_standardized.shape)
+
+# Defragment the DataFrame
+CSU_df_frac_standardized = CSU_df_frac_standardized.copy()
+print("✓ DataFrame defragmented")
+
+# Replace original dataframe
+CSU_df = CSU_df_frac_standardized
+
+# Save conversion log for reference
+with open('fraction_conversion_log.txt', 'w', encoding='utf-8') as f:
+    f.write("Sample Fraction Conversion Log\n")
+    f.write("=" * 40 + "\n\n")
+    for conversion in fraction_conversion_log:
+        f.write(f"{conversion}\n")
+
+print("\nSample fraction conversion log saved to 'fraction_conversion_log.txt'")
 
 # Apply unit standardization
 CSU_df_standardized, conversion_log = standardize_water_quality_units(CSU_df)
@@ -1516,6 +1622,20 @@ app.layout = html.Div(
                                     )
                                 ], style={'margin-bottom': '15px'}),
 
+                                # Supply-Release-Location (Color 2)
+                                html.Div([
+                                    html.Label('Supply Release Location:', 
+                                            style={'color': '#ffffff', 'font-weight': 'bold', 'margin-bottom': '8px', 'display': 'block'}),
+                                    dcc.Dropdown(
+                                        id='supply-release-select',
+                                        options=[],
+                                        value=[],
+                                        multi=True,
+                                        placeholder='Select supply release points to display (or leave empty for none)...',
+                                        style={'margin-bottom': '20px'}
+                                    )
+                                ], style={'margin-bottom': '15px'}),
+
                                 # Exchange-FROM-Location (Color 3)
                                 html.Div([
                                     html.Label('Exchange-from-Location:', 
@@ -1750,18 +1870,31 @@ app.layout = html.Div(
     [Input('characteristic-select', 'value')]
 )
 def update_fraction_options(characteristic):
-    if characteristic is None:
-        return [], None
+    if characteristic is None or characteristic == "All":
+        return [{'label': 'All', 'value': 'All'}], 'All'
     
     # Get available fractions for this characteristic
     char_data = CSU_df[CSU_df['Result_Characteristic'] == characteristic]
     available_fractions = sorted(char_data['Result_SampleFraction'].dropna().unique())
     
-    # Create options list
-    options = [{'label': fraction, 'value': fraction} for fraction in available_fractions]
+    # Create options list with "All" at the top
+    options = [{'label': 'All', 'value': 'All'}] + [{'label': fraction, 'value': fraction} for fraction in available_fractions]
     
-    # Set default value (first available fraction)
-    default_value = available_fractions[0] if available_fractions else None
+    # Get smart default for this characteristic
+    preferred_fraction = FRACTION_DEFAULTS.get(characteristic, 'All')
+    
+    # Check if preferred fraction is actually available for this characteristic
+    if preferred_fraction in available_fractions:
+        default_value = preferred_fraction
+        print(f"Using preferred fraction '{preferred_fraction}' for {characteristic}")
+    elif len(available_fractions) > 0:
+        # Fallback: if preferred not available, use first available
+        default_value = available_fractions[0]
+        print(f"Preferred fraction not available, using '{default_value}' for {characteristic}")
+    else:
+        # No fractions available, use "All"
+        default_value = 'All'
+        print(f"No fractions available for {characteristic}, using 'All'")
     
     print(f"Available fractions for {characteristic}: {available_fractions}")
     
@@ -1795,8 +1928,8 @@ def update_site_options(basin):
         wqx_sites_df = wqx_sites_df.dropna()
         
         # Convert to numeric
-        wqx_sites_df['Location_LatitudeStandardized'] = pd.to_numeric(wqx_sites_df['Location_LatitudeStandardized'], errors='coerce')
-        wqx_sites_df['Location_LongitudeStandardized'] = pd.to_numeric(wqx_sites_df['Location_LongitudeStandardized'], errors='coerce')
+        wqx_sites_df['Location_LatitudeStandardized'] = pd.to_numeric(wqx_sites_df['Location_LatitudeStandardized'], errors='coerce').round(2)
+        wqx_sites_df['Location_LongitudeStandardized'] = pd.to_numeric(wqx_sites_df['Location_LongitudeStandardized'], errors='coerce').round(2)
         wqx_sites_df = wqx_sites_df.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized'])
         
         # Create GeoSeries of points
@@ -2013,9 +2146,9 @@ def toggle_site_modal(clickData, close_clicks, date_range, is_open):
                 ])
                 return True, modal_title, modal_info, []
             
-            # Get site coordinates
-            site_lat = site_data['Location_LatitudeStandardized'].iloc[0]
-            site_lon = site_data['Location_LongitudeStandardized'].iloc[0]
+            # To this:
+            site_lat = round(float(site_data['Location_LatitudeStandardized'].iloc[0]), 2)
+            site_lon = round(float(site_data['Location_LongitudeStandardized'].iloc[0]), 2)
             
             # Get organizations using Org_Identifier column
             if 'Org_Identifier' in site_data.columns:
@@ -2064,8 +2197,8 @@ def toggle_site_modal(clickData, close_clicks, date_range, is_open):
                 
                 if len(numeric_values) > 0:
                     # Get organization(s) for this characteristic
-                    if 'Org_Identifier' in char_data.columns:
-                        char_orgs = char_data['Org_Identifier'].dropna().unique()
+                    if 'Org_FormalName' in char_data.columns:
+                        char_orgs = char_data['Org_FormalName'].dropna().unique()
                         org_display = ", ".join(char_orgs[:2])  # Show first 2 orgs
                         if len(char_orgs) > 2:
                             org_display += f" (+{len(char_orgs)-2} more)"
@@ -2084,7 +2217,6 @@ def toggle_site_modal(clickData, close_clicks, date_range, is_open):
                         'Median': f"{numeric_values.median():.3f}",
                         'Count': f"{len(numeric_values):,}"
                     })
-            
             return True, modal_title, modal_info, stats_data
             
         except Exception as e:
@@ -2095,6 +2227,72 @@ def toggle_site_modal(clickData, close_clicks, date_range, is_open):
     
     return is_open, "", "", []
 
+# Smart defaults for sample fractions by characteristic
+FRACTION_DEFAULTS = {
+                    # Trace metals - typically dissolved
+                    'Selenium': 'Dissolved',
+                    'Iron': 'Dissolved', 
+                    'Arsenic': 'Dissolved',
+                    'Lead': 'Dissolved',
+                    'Aluminum': 'Dissolved',
+                    'Manganese': 'Dissolved',
+                    'Cadmium': 'Dissolved',
+                    'Copper': 'Dissolved',
+                    'Zinc': 'Dissolved',
+                    'Calcium': 'Dissolved',
+                    'Cobalt': 'Dissolved',
+                    'Silver': 'Dissolved',
+                    'Uranium': 'Dissolved',
+                    
+                    # Major ions - typically dissolved
+                    'Magnesium': 'Dissolved',
+                    'Potassium': 'Dissolved',
+                    'Sodium': 'Dissolved',
+                    'Sulfate': 'Dissolved',
+                    
+                    # Solids - typically total
+                    'Total Suspended Solids': 'Total',
+                    'Total suspended solids': 'Total',
+                    'Total dissolved solids': 'Total',
+                    
+                    # Hardness - typically total
+                    'Hardness, Ca, Mg': 'Total',
+                    'Hardness, non-carbonate': 'Total',
+                    'Hardness, carbonate': 'Total',
+                    'Total hardness': 'Total',
+                    
+                    # Nutrients - typically dissolved
+                    'Nitrogen': 'Dissolved',
+                    'Nitrate': 'Dissolved',
+                    'Nitrite': 'Dissolved',
+                    'Nitrate + Nitrite': 'Dissolved',
+                    'Nitrite + Nitrate': 'Dissolved',
+                    'Ammonia': 'Dissolved',
+                    'Ammonia-nitrogen': 'Dissolved',
+                    'Ammonia and ammonium': 'Dissolved',
+                    'Phosphorus': 'Dissolved',
+                    'Total Phosphorus': 'Total',
+                    'Ammonium': 'Dissolved',
+                    'Orthophosphate': 'Dissolved',
+                    'Phosphate-phosphorus': 'Dissolved',
+                    
+                    # Dissolved oxygen - typically dissolved
+                    'Dissolved oxygen': 'Dissolved',
+                    'Dissolved Oxygen (DO)': 'Dissolved',
+                    'Oxygen': 'Dissolved',
+                    
+                    # These typically have no fraction or show all
+                    'pH': 'All',
+                    'Temperature, water': 'All',
+                    'Conductivity': 'All',
+                    'Specific conductance': 'All',
+                    'Flow': 'All',
+                    'Turbidity': 'All',
+                    'Escherichia coli': 'All',
+                    'Escherichia Coli': 'All',
+                    'Salinity': 'All'
+                }                    
+    
 # Update characteristic dropdown based on basin and site selection
 @app.callback(
     [Output('characteristic-select', 'options'),
@@ -2163,8 +2361,8 @@ def update_characteristic_options(basin, site):
             ].copy()
             
             # Convert to numeric
-            data_with_coords['Location_LatitudeStandardized'] = pd.to_numeric(data_with_coords['Location_LatitudeStandardized'], errors='coerce')
-            data_with_coords['Location_LongitudeStandardized'] = pd.to_numeric(data_with_coords['Location_LongitudeStandardized'], errors='coerce')
+            data_with_coords['Location_LatitudeStandardized'] = pd.to_numeric(data_with_coords['Location_LatitudeStandardized'], errors='coerce').round(2)
+            data_with_coords['Location_LongitudeStandardized'] = pd.to_numeric(data_with_coords['Location_LongitudeStandardized'], errors='coerce').round(2)    
             data_with_coords = data_with_coords.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized'])
             
             # Create GeoSeries of points
@@ -2418,6 +2616,72 @@ def update_exchange_to_dropdown(basin):
         traceback.print_exc()
         return [{'label': 'All Exchange-to Points', 'value': 'All'}]
 
+# Callback to populate Subsitute Supply Release dropdown (Color 2)
+@app.callback(
+    Output('supply-release-select', 'options'),
+    [Input('basin-select', 'value')]
+)
+def update_supply_release_dropdown(basin):
+    print(f"\n=== UPDATE SUPPLY RELEASE DROPDOWN CALLED ===")
+    print(f"Basin selected: {basin}")
+    
+    try:
+        # Filter to Color 2 only
+        supply_release_color2 = exchange_gdf[exchange_gdf['Color'] == 2].copy()
+        
+        # If a specific basin is selected, filter exchange points to that basin
+        if basin and basin != 'All':
+            print(f"Filtering supply release points for basin: {basin}")
+            # Find the basin column
+            basin_col = None
+            for col in ['name', 'NAME', 'BASINS', 'BASIN_NAM', 'NAMELSAD']:
+                if col in BASINS_GDF.columns:
+                    basin_col = col
+                    break
+            
+            if basin_col:
+                basin_geom_gdf = BASINS_GDF[BASINS_GDF[basin_col] == basin]
+                
+                if not basin_geom_gdf.empty:
+                    basin_projected = basin_geom_gdf.to_crs('EPSG:26913')
+                    supply_release_projected = supply_release_color2.to_crs('EPSG:26913')  
+                    
+                    basin_union = basin_projected.geometry.iloc[0]
+                    basin_buffered = basin_union.buffer(100)
+
+                    supply_release_filtered = supply_release_projected[supply_release_projected.geometry.intersects(basin_buffered)]  
+                    print(f"✓ Found {len(supply_release_filtered)} supply release points in basin '{basin}'")
+                else:
+                    supply_release_filtered = supply_release_color2
+            else:
+                supply_release_filtered = supply_release_color2
+        else:
+            # Show all Color 2 structures within HUC8 boundaries
+            basins_projected = BASINS_GDF.to_crs('EPSG:26913')
+            supply_release_projected = supply_release_color2.to_crs('EPSG:26913')
+            
+            huc8_union = basins_projected.geometry.union_all()
+            huc8_buffered = huc8_union.buffer(500)
+            supply_release_filtered = supply_release_projected[supply_release_projected.geometry.intersects(huc8_buffered)]
+            print(f"✓ Found {len(supply_release_filtered)} supply release points in all basins")
+
+        if len(supply_release_filtered) == 0:
+            return [{'label': 'No supply release points in selected basin', 'value': 'none', 'disabled': True}]
+
+        options = [{'label': 'All Supply Release Points', 'value': 'All'}]
+        for _, row in supply_release_filtered.iterrows():
+            label = row['Label'] if 'Label' in row and pd.notna(row['Label']) else f"Supply Release Point {row.name}"
+            options.append({'label': label, 'value': f"color2_{row.name}"})
+
+        print(f"✓ Returning {len(options)-1} supply release options")
+        return options
+        
+    except Exception as e:
+        print(f"❌ ERROR populating supply release dropdown: {e}")
+        import traceback
+        traceback.print_exc()
+        return [{'label': 'All Supply Release Points', 'value': 'All'}]
+
 # Callback to populate exchange-FROM dropdown (Color 3)
 @app.callback(
     Output('exchange-from-select', 'options'),
@@ -2492,7 +2756,8 @@ def update_exchange_from_dropdown(basin):
      Input('basin-select', 'value'),
      Input('site-select', 'value'),
      Input('canal-select', 'value'),
-     Input('exchange-to-select', 'value'),      
+     Input('exchange-to-select', 'value'),    
+     Input('supply-release-select', 'value'), 
      Input('exchange-from-select', 'value'),
      Input('rivers-toggle', 'value'),
      Input('additional-layers-toggle', 'value'),
@@ -2502,7 +2767,7 @@ def update_exchange_from_dropdown(basin):
     ]
 )
 
-def highlight_basin(characteristic, fraction, basin, site, selected_canals, selected_exchange_to, selected_exchange_from, rivers_toggle, additional_layers, map_display_options, sample_type, date_range):
+def highlight_basin(characteristic, fraction, basin, site, selected_canals, selected_exchange_to, selected_supply_release, selected_exchange_from, rivers_toggle, additional_layers, map_display_options, sample_type, date_range):
     print(f"Debug: Selected basin = {basin}")
     print(f"Debug: Selected canals = {selected_canals}")
     print(f"Debug: Selected characteristic = {characteristic}")
@@ -2746,7 +3011,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             traceback.print_exc()
 
     # Add exchange points if any are selected
-    if selected_exchange_to or selected_exchange_from:
+    if selected_exchange_to or selected_exchange_from or selected_supply_release:
         try:
             # Determine basin filtering
             if basin and basin != 'All':
@@ -2805,6 +3070,36 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                         text=color1_structures['Label'].tolist(),
                         hovertemplate='<b>★ %{text}</b><br>Exchange-to-Location<extra></extra>',
                         name='★ Exchange-to-Location',
+                        showlegend=True
+                    ))
+            # Handle Supply Release (Color 2)
+            if selected_supply_release:
+                show_all_to = 'All' in selected_supply_release
+                color2_structures = exchange_to_show[exchange_to_show['Color'] == 2]
+                
+                if not show_all_to and selected_supply_release:
+                    selected_indices = []
+                    for sel in selected_supply_release:
+                        if sel.startswith('color2_'):
+                            idx = int(sel.split('_')[1])
+                            selected_indices.append(idx)
+                    color2_structures = color2_structures.loc[color2_structures.index.isin(selected_indices)]
+
+                if len(color2_structures) > 0:
+                    data.append(dict(
+                        lat=[geom.y for geom in color2_structures.geometry],
+                        lon=[geom.x for geom in color2_structures.geometry],
+                        type='scattermapbox',
+                        mode='markers',
+                        marker=dict(
+                            size=14, 
+                            color="#E7E419",
+                            symbol="star",
+                            line=dict(color="#E7E419", width=2)
+                        ),
+                        text=color2_structures['Label'].tolist(),
+                        hovertemplate='<b>★ %{text}</b><br>Supply Release<extra></extra>',
+                        name='★ Supply Release',
                         showlegend=True
                     ))
 
@@ -3134,10 +3429,10 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 
                 usgs_with_coords['Location_LatitudeStandardized'] = pd.to_numeric(
                     usgs_with_coords['Location_LatitudeStandardized'], errors='coerce'
-                )
+                ).round(2)
                 usgs_with_coords['Location_LongitudeStandardized'] = pd.to_numeric(
                     usgs_with_coords['Location_LongitudeStandardized'], errors='coerce'
-                )
+                ).round(2)
                 usgs_with_coords = usgs_with_coords.dropna(
                     subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized']
                 )
@@ -3149,8 +3444,8 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 })
                 
                 all_wqx_sites = CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates()
-                all_wqx_sites['Location_LatitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LatitudeStandardized'], errors='coerce')
-                all_wqx_sites['Location_LongitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LongitudeStandardized'], errors='coerce')
+                all_wqx_sites['Location_LatitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LatitudeStandardized'], errors='coerce').round(2)
+                all_wqx_sites['Location_LongitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LongitudeStandardized'], errors='coerce').round(2)  
                 all_wqx_sites = all_wqx_sites.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized'])
                 
                 non_selected = all_wqx_sites[~all_wqx_sites['Location_Name'].isin(usgs_agg['Site_Name'].unique())]
@@ -3199,8 +3494,8 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             
             if not df.empty:
                 df['Result_Measure'] = pd.to_numeric(df['Result_Measure'], errors='coerce')
-                df['Location_LatitudeStandardized'] = pd.to_numeric(df['Location_LatitudeStandardized'], errors='coerce')
-                df['Location_LongitudeStandardized'] = pd.to_numeric(df['Location_LongitudeStandardized'], errors='coerce')
+                df['Location_LatitudeStandardized'] = pd.to_numeric(df['Location_LatitudeStandardized'], errors='coerce').round(2)      
+                df['Location_LongitudeStandardized'] = pd.to_numeric(df['Location_LongitudeStandardized'], errors='coerce').round(2)
                 df = df.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized', 'Result_Measure'])
 
                 agg_dict = {
@@ -3316,8 +3611,8 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
     else:
                 
         all_wqx_sites = CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates()
-        all_wqx_sites['Location_LatitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LatitudeStandardized'], errors='coerce')
-        all_wqx_sites['Location_LongitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LongitudeStandardized'], errors='coerce')
+        all_wqx_sites['Location_LatitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LatitudeStandardized'], errors='coerce').round(2)
+        all_wqx_sites['Location_LongitudeStandardized'] = pd.to_numeric(all_wqx_sites['Location_LongitudeStandardized'], errors='coerce').round(2)
         all_wqx_sites = all_wqx_sites.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized'])
         
         all_usgs_sites = pd.DataFrame()
@@ -3328,8 +3623,8 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 'Latitude': 'Location_LatitudeStandardized',
                 'Longitude': 'Location_LongitudeStandardized'
             })
-            all_usgs_sites['Location_LatitudeStandardized'] = pd.to_numeric(all_usgs_sites['Location_LatitudeStandardized'], errors='coerce')
-            all_usgs_sites['Location_LongitudeStandardized'] = pd.to_numeric(all_usgs_sites['Location_LongitudeStandardized'], errors='coerce')
+            all_usgs_sites['Location_LatitudeStandardized'] = pd.to_numeric(all_usgs_sites['Location_LatitudeStandardized'], errors='coerce').round(2)
+            all_usgs_sites['Location_LongitudeStandardized'] = pd.to_numeric(all_usgs_sites['Location_LongitudeStandardized'], errors='coerce').round(2)
             all_usgs_sites = all_usgs_sites.dropna(subset=['Location_LatitudeStandardized', 'Location_LongitudeStandardized'])
             all_usgs_sites['is_usgs'] = True
         
@@ -3359,7 +3654,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
                 mode='markers',
                 hovertext=[f"{name}<br>{'(USGS Site)' if is_usgs else '(WQX Site)'}" 
                         for name, is_usgs in zip(selected_df['Location_Name'], selected_df['is_usgs'])],
-                marker=dict(size=15, color='#00CED1', opacity=1),
+                marker=dict(size=15, color="blue", opacity=1),
                 name='Selected Sites',
                 showlegend=True
             ))
@@ -3443,40 +3738,6 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
         uirevision='constant'
     )
 
-    # Add text labels for selected sites
-    if show_labels and selected_sites:
-        print(f"Debug: Creating text labels for {len(selected_sites)} sites")
-        
-        # Get coordinates for selected sites
-        all_sites_coords = CSU_df[['Location_Name', 'Location_LatitudeStandardized', 'Location_LongitudeStandardized']].drop_duplicates()
-        
-        for site_name in selected_sites:
-            site_row = all_sites_coords[all_sites_coords['Location_Name'] == site_name]
-            if not site_row.empty:
-                lat = float(site_row.iloc[0]['Location_LatitudeStandardized'])
-                lon = float(site_row.iloc[0]['Location_LongitudeStandardized'])
-                
-                # Offset the label slightly above the marker
-                lat_offset = lat + 0.02  # Move label up
-                
-                # Add text trace with very visible styling
-                data.append(dict(
-                    type='scattermapbox',
-                    lon=[lon],
-                    lat=[lat_offset],
-                    mode='markers+text',  # Use both to ensure it renders
-                    marker=dict(size=1, color='rgba(0,0,0,0)'),  # Invisible marker
-                    text=site_name,
-                    textfont=dict(
-                        size=16, 
-                        color='#FFFF00',  # Bright yellow
-                        family='Arial Black'
-                    ),
-                    showlegend=False,
-                    hoverinfo='skip'
-                ))
-                print(f"Debug: Added label for {site_name} at ({lat_offset}, {lon})")
-
     fig = dict(data=data, layout=layout)
     return fig
 
@@ -3498,6 +3759,7 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
 def plot_data(characteristic, fraction, basin, site, sample_type, date_range, additional_data, clickData):  
     
     # Handle click data
+    # Handle click data
     clicked_site = None
     if clickData:
         try:
@@ -3508,8 +3770,16 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
                 clicked_site = clicked_text
             
             if clicked_site and clicked_site not in ['Other Stations', 'No Data Available', '']:
-                site = clicked_site
-                print(f"Debug: Map clicked - using site: {clicked_site}")
+                no_sites_selected = (
+                    site is None or 
+                    site == 'All' or 
+                    (isinstance(site, list) and (len(site) == 0 or site == ['All']))
+                )
+                if no_sites_selected:
+                    site = clicked_site
+                    print(f"Debug: Map clicked - using site: {clicked_site}")
+                else:
+                    print(f"Debug: Map clicked but dropdown has selection, ignoring click")
         except Exception as e:
             print(f"Debug: Error processing click data: {e}")
             pass
