@@ -140,10 +140,13 @@ def import_arkansas_river_usgs_data():
     combined_df = pd.concat(all_data, ignore_index=True)
     combined_df = combined_df.sort_values(['Site_Number', 'Date']).reset_index(drop=True)
     
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    asset_dir = os.path.join(os.path.dirname(script_dir), "assets")
+
     today_str = datetime.today().strftime("%Y%m%d")
-    output_file = f"USGS_DailyData_Arkansas_19901001-{today_str}.csv"
-    combined_df.to_csv(output_file, index=False)
-    
+    output_file = os.path.join(asset_dir, f"USGS_DailyData_Arkansas_19901001-{today_str}.csv")
+    combined_df.to_csv(output_file, index=False) 
+
     print("\n" + "="*80)
     print(f"✓ Total records: {len(combined_df):,}")
     print(f"✓ Output: {output_file}")

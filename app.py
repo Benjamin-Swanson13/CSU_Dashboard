@@ -14,6 +14,7 @@ import pandas as pd
 import geopandas as gpd
 from dash.dependencies import Input, Output, State
 from util.shapefile_functions import add_shapefile_data
+from util.USGSImport import import_arkansas_river_usgs_data
 from util.data_import import WQXDataImport
 import json
 import plotly.express as px
@@ -28,6 +29,7 @@ import numpy as np
 import glob
 import fiona
 import base64
+import traceback
 
 def get_icon_url(icon_path):
     with open(icon_path, 'rb') as f:
@@ -56,7 +58,7 @@ else:
 
 # For deployment - always use existing data
 # User input disabled for deployment
-"""
+
 #call data import function
 user_input = input("Do you want to initiate a new data pull from WQX? (y/n): ").strip().lower()
 
@@ -67,14 +69,25 @@ if user_input in ['y', 'yes']:
         parsed_csv = WQXDataImport()
         print("WQX Import/Data Processing Complete, exported to " + parsed_csv  + ".")
     except Exception as e:
-        print("function raised an error:", e)
+        print("WQX function raised an error:")
+        traceback.print_exc()
+        exit()
+
+    print("Initiating new data pull from USGS...")
+    try:
+        import_arkansas_river_usgs_data()
+        print("USGS Import Complete.")
+    except Exception as e:
+        print("USGS function raised an error:")
+        traceback.print_exc()
+        exit()
 
 elif user_input not in ['n', 'no']:
     print("Invalid input, exiting script...")
     exit()
 
 print("Initializing, processing large amounts of data - this may take a minute...")
-"""
+
 
 print("Loading existing data file...")
 
@@ -309,7 +322,7 @@ def filter_data(df, characteristic, fraction, basin, site, sample_type, start_ye
     if len(data_out) > 0:
         try:
             date_mask = (
-                (data_out['Activity_StartDate'] > datetime(year=start_year, month=1, day=1)) & 
+                (data_out['Activity_StartDate'] >= datetime(year=start_year, month=1, day=1)) & 
                 (data_out['Activity_StartDate'] <= datetime(year=end_year, month=12, day=31))
             )
             data_out = data_out[date_mask].copy()
@@ -922,8 +935,14 @@ ASSESSMENT_CATEGORIES = {
 }
 
 # Date range slider limits
-min_year = CSU_df['Activity_StartDate'].min().year
-max_year = CSU_df['Activity_StartDate'].max().year
+wqx_dates = pd.to_datetime(CSU_df['Activity_StartDate'], errors='coerce')
+min_year = int(wqx_dates.min().year)
+max_year = int(wqx_dates.max().year)
+
+if 'HAS_USGS_DATA' in globals() and HAS_USGS_DATA and not USGS_df.empty:
+    usgs_dates = pd.to_datetime(USGS_df['Date'], errors='coerce')
+    min_year = int(min(min_year, usgs_dates.min().year))
+    max_year = int(max(max_year, usgs_dates.max().year))
 
 # Load Canals shp
 canals_gdf = gpd.read_file('assets/Final_GIS_Canal_Layer.shp')
@@ -1539,17 +1558,14 @@ app.layout = html.Div(
                              style={'color': '#ffffff', 'font-weight': 'bold', 'margin-bottom': '15px', 'display': 'block', 'font-size': '16px'}),
                     dcc.RangeSlider(
                         id='date-slider',
-                        min=min(CSU_df['Activity_StartDate'].apply(pd.to_datetime)).year,
-                        max=max(CSU_df['Activity_StartDate'].apply(pd.to_datetime)).year,
+                        min=min_year,
+                        max=max_year,
                         step=1,
                         marks={
                             year: {'label': str(year), 'style': {'color': '#ffffff', 'font-size': '12px'}}
-                            for year in range(
-                                min(CSU_df['Activity_StartDate'].apply(pd.to_datetime)).year,
-                                max(CSU_df['Activity_StartDate'].apply(pd.to_datetime)).year + 1, 2
-                            )
+                            for year in range(min_year, max_year + 1, 2)
                         },
-                        value=[1986, 2025],
+                        value=[min_year, max_year],
                         tooltip={'placement': 'bottom', 'always_visible': True}
                     )
                 ], style={'margin-bottom': '20px'})
@@ -5315,4 +5331,4 @@ def plot_heatmap(characteristic, fraction, basin, site, sample_type, date_range)
     return figure
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)

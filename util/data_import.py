@@ -199,71 +199,86 @@ def WQXDataImport():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     print("WD identified as: " + script_dir)
     
+    asset_dir = os.path.join(os.path.dirname(script_dir), "assets")
+    today_url = datetime.today().strftime("%m-%d-%Y")
+    today_str = datetime.today().strftime("%Y%m%d")
+    base_date_range = f"startDateLo=10-01-1990&startDateHi={today_url}"
+
     # URLs for beta format (direct CSV download, no zip)
-    beta_stations_URL = "https://www.waterqualitydata.us/wqx3/Station/search?statecode=US%3A08&countycode=US%3A08%3A025&countycode=US%3A08%3A011&countycode=US%3A08%3A099&countycode=US%3A08%3A101&countycode=US%3A08%3A071&countycode=US%3A08%3A061&countycode=US%3A08%3A041&sampleMedia=Water&sampleMedia=water&sampleMedia=Other&startDateLo=10-01-1990&startDateHi=12-31-2025&mimeType=csv&providers=NWIS&providers=STORET"
-    beta_results_URL = "https://www.waterqualitydata.us/wqx3/Result/search?statecode=US%3A08&countycode=US%3A08%3A025&countycode=US%3A08%3A011&countycode=US%3A08%3A099&countycode=US%3A08%3A101&countycode=US%3A08%3A071&countycode=US%3A08%3A061&countycode=US%3A08%3A041&sampleMedia=Water&sampleMedia=water&sampleMedia=Other&startDateLo=10-01-1990&startDateHi=12-31-2025&mimeType=csv&dataProfile=fullPhysChem&providers=NWIS&providers=STORET"
+    beta_stations_URL = f"https://www.waterqualitydata.us/wqx3/Station/search?statecode=US%3A08&countycode=US%3A08%3A025&countycode=US%3A08%3A011&countycode=US%3A08%3A099&countycode=US%3A08%3A101&countycode=US%3A08%3A071&countycode=US%3A08%3A061&countycode=US%3A08%3A041&sampleMedia=Water&sampleMedia=water&sampleMedia=Other&{base_date_range}&mimeType=csv&providers=NWIS&providers=STORET"
+    beta_results_URL = f"https://www.waterqualitydata.us/wqx3/Result/search?statecode=US%3A08&countycode=US%3A08%3A025&countycode=US%3A08%3A011&countycode=US%3A08%3A099&countycode=US%3A08%3A101&countycode=US%3A08%3A071&countycode=US%3A08%3A061&countycode=US%3A08%3A041&sampleMedia=Water&sampleMedia=water&sampleMedia=Other&{base_date_range}&mimeType=csv&dataProfile=fullPhysChem&providers=NWIS&providers=STORET"
     #beta_results_URL = "https://www.waterqualitydata.us/wqx3/Result/search?countrycode=US&statecode=US%3A08&bBox=-105.027483%2C37.706810%2C-102.076646%2C39.237325&sampleMedia=Water&sampleMedia=water&sampleMedia=Other&startDateLo=10-01-1990&mimeType=csv&dataProfile=fullPhysChem&providers=NWIS&providers=STORET"
     
-    today_str = datetime.today().strftime("%Y%m%d") 
-    outputfile_name = f"CSU_EPAWQData_Beta_19901001-{today_str}_parsed.csv"
+    today_str = datetime.today().strftime("%Y%m%d")
+    asset_dir = os.path.join(os.path.dirname(script_dir), "assets")
+    outputfile_name = os.path.join(asset_dir, f"CSU_EPAWQData_Beta_19901001-{today_str}_parsed.csv")
 
+    
+    
     # Download data in chunks to avoid API limits
-    print("Downloading data in year chunks to avoid API limits...")
+    reuse_existing_raw = False
     beta_stations_path = os.path.join(script_dir, "beta_station.csv")
     beta_results_path = os.path.join(script_dir, "beta_result.csv")
 
-    # Download stations once (covers all years)
-    print("Downloading stations data...")
-    response = requests.get(beta_stations_URL, stream=True)
-    with open(beta_stations_path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-    print("✓ Stations downloaded")
+    if not reuse_existing_raw:
+        print("Downloading data in year chunks to avoid API limits...")
 
-    # Define year ranges for chunked downloads
-    year_ranges = [
-        ("10-01-1990", "12-31-1999"),
-        ("01-01-2000", "12-31-2009"),
-        ("01-01-2010", "12-31-2019"),
-        ("01-01-2020", "12-31-2025")
-    ]
-
-    all_results = []
-
-    for start_date, end_date in year_ranges:
-        print(f"Downloading results for {start_date} to {end_date}...")
-        
-        # Build URL with date range
-        chunk_url = beta_results_URL.replace(
-            "startDateLo=10-01-1990&startDateHi=12-31-2025",
-            f"startDateLo={start_date}&startDateHi={end_date}"
-        )
-        
-        response = requests.get(chunk_url, stream=True)
-        temp_path = os.path.join(script_dir, f"temp_{start_date[:4]}.csv")
-        
-        with open(temp_path, "wb") as f:
+        # Download stations once (covers all years)
+        print("Downloading stations data...")
+        response = requests.get(beta_stations_URL, stream=True)
+        with open(beta_stations_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
-        
-        # Read and append
-        chunk_df = pd.read_csv(temp_path, low_memory=False)
-        all_results.append(chunk_df)
-        print(f"  ✓ {len(chunk_df)} records")
-        
-        # Clean up temp file
-        os.remove(temp_path)
+        print("✓ Stations downloaded")
 
-    # Combine all chunks
-    print("Combining all data chunks...")
-    beta_results_df = pd.concat(all_results, ignore_index=True)
-    print(f"✓ Total combined: {len(beta_results_df)} records")
+        # Define year ranges for chunked downloads
+        year_ranges = [
+            ("10-01-1990", "12-31-1999"),
+            ("01-01-2000", "12-31-2009"),
+            ("01-01-2010", "12-31-2019"),
+            ("01-01-2020", "12-31-2025"),
+            ("01-01-2026", today_url),
+        ]
 
-    # Save combined results
-    beta_results_df.to_csv(beta_results_path, index=False)
-    print("✓ Combined results saved")
+        all_results = []
+
+        for start_date, end_date in year_ranges:
+            print(f"Downloading results for {start_date} to {end_date}...")
+            
+            # Build URL with date range
+            chunk_url = beta_results_URL.replace(
+                base_date_range,
+                f"startDateLo={start_date}&startDateHi={end_date}"
+            )
+            
+            response = requests.get(chunk_url, stream=True)
+            temp_path = os.path.join(script_dir, f"temp_{start_date[:4]}.csv")
+            
+            with open(temp_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            
+            # Read and append
+            chunk_df = pd.read_csv(temp_path, low_memory=False)
+            all_results.append(chunk_df)
+            print(f"  ✓ {len(chunk_df)} records")
+            
+            # Clean up temp file
+            os.remove(temp_path)
+
+        # Combine all chunks
+        print("Combining all data chunks...")
+        beta_results_df = pd.concat(all_results, ignore_index=True)
+        print(f"✓ Total combined: {len(beta_results_df)} records")
+
+        # Save combined results
+        beta_results_df.to_csv(beta_results_path, index=False)
+        print("✓ Combined results saved")
+
+    else:
+        print("Reusing existing beta_station.csv and beta_result.csv")
 
     # Read CSVs
     print("Reading data files...")
@@ -370,8 +385,8 @@ def WQXDataImport():
     filtered_df = filtered_df.reset_index(drop=True)
 
     # Add Acute and Chronic columns
-    filtered_df["Acute"] = ""
-    filtered_df["Chronic"] = ""
+    filtered_df["Acute"] = pd.Series(np.nan, index=filtered_df.index, dtype="object")
+    filtered_df["Chronic"] = pd.Series(np.nan, index=filtered_df.index, dtype="object")
 
     # Define the criteria mapping
     criteria_mapping = {

@@ -12,10 +12,10 @@ Magnesium: 22 records converted from ug/L to mg/L
 Potassium: 17 records converted from ug/L to mg/L
 Sodium: 8 records converted from ug/L to mg/L
 Phosphorus: 11 records converted from ug/L to mg/L
-pH: 19222 records standardized to 'std units'
+pH: 18661 records standardized to 'std units'
 Conductivity: 20 records converted from ms/cm to uS/cm
-Flow: 5789 records renamed ft3/s -> cfs
-Flow: 5638 records converted from m3/sec to cfs
+Flow: 5841 records renamed ft3/s -> cfs
+Flow: 5829 records converted from m3/sec to cfs
 
 
 Preserved Units (Different Analytical Methods):
