@@ -1,0 +1,10 @@
+dash
+dash-bootstrap-components
+gunicorn
+pandas
+numpy
+plotly
+pyarrow
+geopandas
+shapely
+pyproj
