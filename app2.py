@@ -577,7 +577,7 @@ app.index_string = '''
                 background-color: #404040 !important;
                 border: 2px solid #555 !important;
                 border-radius: 6px !important;
-                color: #ffffff !important;
+                color: #000000 !important;
                 min-height: auto !important;
             }
             
@@ -608,28 +608,40 @@ app.index_string = '''
             
             .Select-option {
                 background-color: #404040 !important;
-                color: #d6dde5 !important;
+                color: #000000 !important;
                 padding: 12px 16px !important;
             }
             
             .Select-option:hover, 
             .Select-option.is-focused {
                 background-color: rgba(79, 195, 247, 0.2) !important;
-                color: #ffffff !important;
+                color: #000000 !important;
             }
 
             .Select-placeholder {
-                color: #b9c4cf !important;
+                color: #000000 !important;
             }
 
             .Select-input > input {
-                color: #ffffff !important;
+                color: #000000 !important;
             }
             
             .Select-value-label {
-                color: #ffffff !important;
+                color: #000000 !important;
                 padding: 8px 12px !important;
                 white-space: normal !important;
+            }
+
+            .Select-value,
+            .Select-value span,
+            .Select-value-label,
+            .Select-placeholder,
+            .Select-input,
+            .Select-input input,
+            .VirtualizedSelectOption,
+            .VirtualizedSelectFocusedOption {
+                color: #000000 !important;
+                -webkit-text-fill-color: #000000 !important;
             }
             
         /* Make sure dropdown container has proper positioning */
@@ -1487,7 +1499,7 @@ app.layout = html.Div(
             children=[
                 html.Div(
                     html.H1(
-                        'Colorado Water Quality Dashboard',
+                        'Colorado Springs Utilities Water Quality Dashboard',
                         style={
                             'margin': '0',
                             'color': '#4fc3f7',
@@ -1685,15 +1697,7 @@ app.layout = html.Div(
                             for year in range(min_year, max_year + 1, 2)
                         },
                         value=[min_year, max_year],
-                        tooltip={
-                            'placement': 'bottom',
-                            'always_visible': True,
-                            'style': {
-                                'color': '#111111',
-                                'backgroundColor': '#ffffff',
-                                'border': '1px solid #777777'
-                            }
-                        }
+                        tooltip={'placement': 'bottom', 'always_visible': False}
                     )
                 ], style={'margin-bottom': '20px'})
             ],
