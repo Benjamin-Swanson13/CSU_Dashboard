@@ -102,7 +102,7 @@ def standardize_units(df: pd.DataFrame) -> pd.DataFrame:
 
     trace_metals = ["Selenium", "Aluminum", "Arsenic", "Cadmium", "Copper", "Iron", "Lead", "Manganese", "Zinc", "Silver", "Cobalt", "Uranium"]
     major_ions = ["Calcium", "Magnesium", "Potassium", "Sodium", "Sulfate", "Phosphorus", "Total Phosphorus", "Orthophosphate", "Phosphate-phosphorus"]
-    nitrogen = ["Nitrogen", "Nitrate", "Nitrite", "Nitrate + Nitrite", "Nitrite + Nitrate", "Ammonia", "Ammonia-nitrogen", "Ammonia and ammonium", "Ammonium", "Total Kjeldahl Nitrogen"]
+    nitrogen = ["Nitrogen", "Nitrate", "Nitrite", "Nitrate + Nitrite", "Nitrite + Nitrate", "Inorganic nitrogen (nitrate and nitrite)", "Ammonia", "Ammonia-nitrogen", "Ammonia and ammonium", "Ammonia and Ammonium", "Ammonium", "Kjeldahl nitrogen", "Kjeldahl Nitrogen", "Total Kjeldahl Nitrogen"]
     solids = ["Total Suspended Solids", "Total suspended solids", "Total dissolved solids"]
     hardness = ["Hardness, Ca, Mg", "Hardness, non-carbonate", "Hardness, carbonate", "Total hardness"]
 
@@ -137,7 +137,7 @@ def standardize_units(df: pd.DataFrame) -> pd.DataFrame:
     mask = (df["Result_Characteristic"] == "Temperature, water") & unit_in(["deg F", "F", "°F"])
     df.loc[mask, "Result_Measure"] = (df.loc[mask, "Result_Measure"] - 32) * 5 / 9
     df.loc[mask, "Result_MeasureUnit"] = "deg C"
-    mask = df["Result_Characteristic"].isin(["Dissolved oxygen", "Dissolved Oxygen (DO)", "Oxygen"]) & unit_in(["ug/L", "ug/l", "µg/L"])
+    mask = df["Result_Characteristic"].isin(["Dissolved oxygen", "Dissolved oxygen (DO)", "Dissolved Oxygen (DO)", "Oxygen"]) & unit_in(["ug/L", "ug/l", "µg/L"])
     df.loc[mask, "Result_Measure"] = df.loc[mask, "Result_Measure"] * 0.001
     df.loc[mask, "Result_MeasureUnit"] = "mg/L"
     return df
