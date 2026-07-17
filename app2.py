@@ -507,6 +507,36 @@ app = dash.Dash(
 app.title = "Colorado Springs Utilities Water Quality Data Dashboard"
 server = app.server
 
+SECTION_HEADER_CARD_STYLE = {
+    'display': 'inline-block',
+    'backgroundColor': '#24303a',
+    'border': '1px solid #3a4d5e',
+    'borderRadius': '10px',
+    'padding': '10px 14px',
+    'boxShadow': '0 0 0 1px rgba(79, 195, 247, 0.12), 0 8px 18px rgba(0, 0, 0, 0.18)'
+}
+
+SECTION_HEADER_TEXT_STYLE = {
+    'margin': '0',
+    'color': '#ffffff',
+    'font-size': '18px',
+    'font-weight': '700',
+    'letter-spacing': '0.02em',
+    'line-height': '1.15',
+    'text-align': 'left',
+    'text-shadow': '0 0 8px rgba(79, 195, 247, 0.12)'
+}
+
+
+def section_header(title, *, font_size='18px', margin_bottom='15px', text_align='left'):
+    header_text_style = dict(SECTION_HEADER_TEXT_STYLE)
+    header_text_style['font-size'] = font_size
+    header_text_style['text-align'] = text_align
+    return html.Div(
+        html.H3(title, style=header_text_style),
+        style={**SECTION_HEADER_CARD_STYLE, 'margin-bottom': margin_bottom}
+    )
+
 app.index_string = '''
 <!DOCTYPE html>
 <html>
@@ -526,6 +556,16 @@ app.index_string = '''
                 margin: 0;
                 padding: 0;
             }
+
+            :root {
+                --bs-primary: #4fc3f7 !important;
+                --bs-primary-rgb: 79, 195, 247 !important;
+                --bs-link-color: #4fc3f7 !important;
+                --bs-link-hover-color: #7dd3fc !important;
+                --bs-focus-ring-color: rgba(79, 195, 247, 0.25) !important;
+                --Dash-Fill-Interactive-Strong: #4fc3f7 !important;
+                --Dash-Fill-Interactive-Weak: rgba(79, 195, 247, 0.12) !important;
+            }
             
             #root {
                 background-color: #1e1e1e !important;
@@ -542,7 +582,8 @@ app.index_string = '''
             }
             
             .Select-control:hover {
-                border-color: #777 !important;
+                border-color: #4fc3f7 !important;
+                box-shadow: 0 0 0 1px rgba(79, 195, 247, 0.2) !important;
             }
             
         /* Allow multi-select values to wrap within the dropdown */
@@ -567,13 +608,21 @@ app.index_string = '''
             
             .Select-option {
                 background-color: #404040 !important;
-                color: #ffffff !important;
+                color: #d6dde5 !important;
                 padding: 12px 16px !important;
             }
             
             .Select-option:hover, 
             .Select-option.is-focused {
-                background-color: #555 !important;
+                background-color: rgba(79, 195, 247, 0.2) !important;
+                color: #ffffff !important;
+            }
+
+            .Select-placeholder {
+                color: #b9c4cf !important;
+            }
+
+            .Select-input > input {
                 color: #ffffff !important;
             }
             
@@ -597,6 +646,37 @@ app.index_string = '''
         /* Give higher z-index to focused dropdown */
             .Select.is-focused {
                 z-index: 10000 !important;
+            }
+
+            .Select.is-focused > .Select-control {
+                border-color: #4fc3f7 !important;
+                box-shadow: 0 0 0 2px rgba(79, 195, 247, 0.25) !important;
+            }
+
+            input[type="checkbox"],
+            input[type="radio"],
+            .form-check-input {
+                accent-color: #ffffff !important;
+            }
+
+            .form-check-input:checked {
+                background-color: #ffffff !important;
+                border-color: #ffffff !important;
+            }
+
+            .form-check-input:focus,
+            .btn:focus,
+            .btn:focus-visible,
+            .form-control:focus,
+            .form-select:focus {
+                border-color: #4fc3f7 !important;
+                box-shadow: 0 0 0 0.25rem rgba(79, 195, 247, 0.25) !important;
+            }
+
+            #dropdown-filters label,
+            #dropdown-filters .form-check-label,
+            #top-map-section label {
+                color: #d6dde5 !important;
             }
             
         /* Stacking context for each dropdown wrapper */
@@ -622,13 +702,13 @@ app.index_string = '''
             }
             
             .rc-slider-track {
-                background-color: #2196F3 !important;
+                background-color: #4fc3f7 !important;
                 height: 6px !important;
             }
             
             .rc-slider-handle {
-                border: 2px solid #2196F3 !important;
-                background-color: #2196F3 !important;
+                border: 2px solid #4fc3f7 !important;
+                background-color: #4fc3f7 !important;
                 height: 18px !important;
                 width: 18px !important;
                 margin-top: -6px !important;
@@ -636,7 +716,8 @@ app.index_string = '''
             }
             
             .rc-slider-handle:hover {
-                border-color: #1976D2 !important;
+                border-color: #7dd3fc !important;
+                box-shadow: 0 0 0 5px rgba(79, 195, 247, 0.18) !important;
             }
             
             .rc-slider-mark-text {
@@ -1404,11 +1485,36 @@ app.layout = html.Div(
         html.Div(
             id='header',
             children=[
-                html.H1('Colorado Springs Utilities Water Quality Data Dashboard', 
-                       style={'text-align': 'center', 'color': '#ffffff', 'margin-bottom': '30px',
-                              'font-size': '28px', 'font-weight': '300'})
+                html.Div(
+                    html.H1(
+                        'Colorado Water Quality Dashboard',
+                        style={
+                            'margin': '0',
+                            'color': '#4fc3f7',
+                            'font-size': '34px',
+                            'font-weight': '700',
+                            'letter-spacing': '0.02em',
+                            'text-align': 'center',
+                            'line-height': '1.15',
+                            'text-shadow': '0 0 12px rgba(79, 195, 247, 0.18)'
+                        }
+                    ),
+                    style={
+                        'display': 'inline-block',
+                        'backgroundColor': '#24303a',
+                        'border': '1px solid #3a4d5e',
+                        'borderRadius': '10px',
+                        'padding': '14px 18px',
+                        'boxShadow': '0 0 0 1px rgba(79, 195, 247, 0.12), 0 8px 20px rgba(0, 0, 0, 0.22)'
+                    }
+                )
             ],
-            style={'padding': '20px 0', 'background-color': '#2d2d2d', 'margin-bottom': '20px'}
+            style={
+                'padding': '20px 0 24px 0',
+                'background-color': '#2d2d2d',
+                'margin-bottom': '20px',
+                'textAlign': 'center'
+            }
         ),
         
         # Modal for pop up plot
@@ -1480,8 +1586,7 @@ app.layout = html.Div(
             id='top-map-section',
             children=[
                 html.Div([
-                    html.H3('Monitoring Locations', 
-                           style={'color': '#ffffff', 'margin-bottom': '15px', 'font-size': '18px'}),
+                    section_header('Monitoring Locations'),
                     
                     # Rivers & Streams Dropdown (above the map)
                     html.Div([
@@ -1513,7 +1618,7 @@ app.layout = html.Div(
                             ],
                             value=[],
                             style={'color': '#ffffff'},
-                            labelStyle={'display': 'block', 'margin-bottom': '5px'}
+                            labelStyle={'display': 'block', 'margin-bottom': '5px', 'color': '#ffffff'}
                         )
                     ], style={'margin-bottom': '15px'}),
 
@@ -1527,7 +1632,7 @@ app.layout = html.Div(
                             ],
                             value=[],  # Empty by default (labels hidden)
                             style={'color': '#ffffff'},
-                            labelStyle={'display': 'block', 'margin-bottom': '5px'}
+                            labelStyle={'display': 'block', 'margin-bottom': '5px', 'color': '#ffffff'}
                         )
                     ], style={'margin-bottom': '15px'}),
 
@@ -1574,12 +1679,21 @@ app.layout = html.Div(
                         min=min_year,
                         max=max_year,
                         step=1,
+                        className='date-range-slider',
                         marks={
                             year: {'label': str(year), 'style': {'color': '#ffffff', 'font-size': '12px'}}
                             for year in range(min_year, max_year + 1, 2)
                         },
                         value=[min_year, max_year],
-                        tooltip={'placement': 'bottom', 'always_visible': True}
+                        tooltip={
+                            'placement': 'bottom',
+                            'always_visible': True,
+                            'style': {
+                                'color': '#111111',
+                                'backgroundColor': '#ffffff',
+                                'border': '1px solid #777777'
+                            }
+                        }
                     )
                 ], style={'margin-bottom': '20px'})
             ],
@@ -1748,8 +1862,7 @@ app.layout = html.Div(
                     children=[
                         html.Div([
                             html.Div([
-                                html.H3('Time Series Analysis', 
-                                    style={'color': '#ffffff', 'margin-bottom': '15px', 'font-size': '18px', 'display': 'inline-block'}),
+                                section_header('Time Series Analysis'),
                                 html.Button(
                                     '⬇ Export Data',
                                     id='export-timeseries-btn',
@@ -1810,8 +1923,7 @@ app.layout = html.Div(
                 
                 # Summary table
                 html.Div([
-                    html.H3('Summary Statistics', 
-                           style={'color': '#ffffff', 'margin-bottom': '15px', 'font-size': '18px'}),
+                    section_header('Summary Statistics'),
                     dash_table.DataTable(
                         data=None,
                         id='summary-table',
@@ -1869,8 +1981,7 @@ app.layout = html.Div(
                 
                 # Heatmap
                 html.Div([
-                    html.H3('Spatial and Temporal Heatmap', 
-                           style={'color': '#ffffff', 'margin-bottom': '15px', 'font-size': '18px'}),
+                    section_header('Spatial and Temporal Heatmap'),
                     dcc.Graph(
                         id='heatmap',
                         figure={},
