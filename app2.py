@@ -2671,7 +2671,8 @@ def update_characteristic_options(basin, site):
 
 # Callback to populate canal dropdown based on selected basin
 @app.callback(
-    Output('canal-select', 'options'),
+    [Output('canal-select', 'options'),
+     Output('canal-select', 'value')],
     [Input('basin-select', 'value')]
 )
 def update_canal_dropdown(basin):
@@ -2744,7 +2745,7 @@ def update_canal_dropdown(basin):
         # Check if any canals were found
         if len(canals_filtered) == 0:
             print("❌ No canals found - returning 'No canals' message")
-            return [{'label': 'No canals in selected basin', 'value': 'none', 'disabled': True}]
+            return [{'label': 'No canals in selected basin', 'value': 'none', 'disabled': True}], []
         
         # Get canal names
         name_col = None
@@ -2761,23 +2762,23 @@ def update_canal_dropdown(basin):
             
             if len(canal_names) == 0:
                 print("❌ No named canals found")
-                return [{'label': 'No canals in selected basin', 'value': 'none', 'disabled': True}]
+                return [{'label': 'No canals in selected basin', 'value': 'none', 'disabled': True}], []
             
             # Add "All" option at the beginning
             options = [{'label': 'All Canals', 'value': 'All'}] + [{'label': name, 'value': name} for name in canal_names]
             print(f"✓ Returning {len(options)-1} canal options for dropdown")
             print("=== CANAL DROPDOWN UPDATE COMPLETE ===\n")
-            return options
+            return options, []
         else:
             print("⚠ No name column found for canals")
-            return [{'label': 'No canals available', 'value': 'none', 'disabled': True}]
+            return [{'label': 'No canals available', 'value': 'none', 'disabled': True}], []
         
     except Exception as e:
         print(f"❌ ERROR populating canal dropdown: {e}")
         import traceback
         traceback.print_exc()
         print("=== CANAL DROPDOWN UPDATE FAILED ===\n")
-        return [{'label': 'Error loading canals', 'value': 'error', 'disabled': True}]
+        return [{'label': 'Error loading canals', 'value': 'error', 'disabled': True}], []
 
 # Callback to populate exchange-TO dropdown (Color 1)
 @app.callback(
@@ -3007,6 +3008,8 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
     print(f"Debug: Selected basin = {basin}")
     print(f"Debug: Selected canals = {selected_canals}")
     print(f"Debug: Selected characteristic = {characteristic}")
+    if selected_canals and any(value in selected_canals for value in ['none', 'error']):
+        selected_canals = []
     global canals_gdf, exchange_gdf, streams_gdf, stream_segments_gdf, lakes_gdf
     if selected_canals:
         canals_gdf = load_canals_gdf()
