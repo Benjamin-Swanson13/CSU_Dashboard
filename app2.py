@@ -1128,12 +1128,28 @@ canals_gdf = None
 exchange_gdf = None
 streams_gdf = None
 
+CANAL_NAME_COLUMNS = ['poss_name', 'name', 'canal_name', 'canalname']
+
+
+def find_canal_name_column(gdf):
+    for col in gdf.columns:
+        if col.lower() in CANAL_NAME_COLUMNS:
+            return col
+    return None
+
 
 def load_canals_gdf():
     global canals_gdf
     if canals_gdf is None:
         optimized_path = ASSET_DIR / 'optimized' / 'canals_simplified.geojson'
-        canals_gdf = gpd.read_file(optimized_path if optimized_path.exists() else ASSET_DIR / 'Final_GIS_Canal_Layer.shp')
+        source_path = ASSET_DIR / 'Final_GIS_Canal_Layer.shp'
+        canal_path = optimized_path if optimized_path.exists() else source_path
+        canals_gdf = gpd.read_file(canal_path)
+
+        if find_canal_name_column(canals_gdf) is None and canal_path != source_path and source_path.exists():
+            print("Optimized canal layer has no name attributes; loading original canal shapefile.")
+            canals_gdf = gpd.read_file(source_path)
+
         canals_gdf = canals_gdf.to_crs('EPSG:4326')
         report_memory('after lazy canal load')
     return canals_gdf
@@ -2748,11 +2764,7 @@ def update_canal_dropdown(basin):
             return [{'label': 'No canals in selected basin', 'value': 'none', 'disabled': True}], []
         
         # Get canal names
-        name_col = None
-        for col in canals_filtered.columns:
-            if col.lower() in ['poss_name', 'name', 'canal_name', 'canalname']:
-                name_col = col
-                break
+        name_col = find_canal_name_column(canals_filtered)
         
         print(f"Using name column: {name_col}")
         
@@ -2771,7 +2783,11 @@ def update_canal_dropdown(basin):
             return options, []
         else:
             print("⚠ No name column found for canals")
-            return [{'label': 'No canals available', 'value': 'none', 'disabled': True}], []
+            options = [{'label': 'All Canals', 'value': 'All'}] + [
+                {'label': f'Canal {idx}', 'value': f'__canal_index__{idx}'}
+                for idx in canals_filtered.index
+            ]
+            return options, []
         
     except Exception as e:
         print(f"❌ ERROR populating canal dropdown: {e}")
@@ -3201,15 +3217,18 @@ def highlight_basin(characteristic, fraction, basin, site, selected_canals, sele
             
             canals_to_show = canals_in_basin.to_crs('EPSG:4326')
             
-            name_col = None
-            for col in canals_to_show.columns:
-                if col.lower() in ['poss_name', 'name', 'canal_name', 'canalname']:
-                    name_col = col
-                    break
+            name_col = find_canal_name_column(canals_to_show)
             
             if name_col and not show_all_canals:
                 selected_canal_names = [c for c in selected_canals if c != 'All']
                 canals_to_show = canals_to_show[canals_to_show[name_col].isin(selected_canal_names)]
+            elif not name_col and not show_all_canals:
+                selected_canal_indices = [
+                    int(c.replace('__canal_index__', ''))
+                    for c in selected_canals
+                    if isinstance(c, str) and c.startswith('__canal_index__') and c.replace('__canal_index__', '').isdigit()
+                ]
+                canals_to_show = canals_to_show[canals_to_show.index.isin(selected_canal_indices)]
             
             for idx, row in canals_to_show.iterrows():
                 geom = row.geometry
