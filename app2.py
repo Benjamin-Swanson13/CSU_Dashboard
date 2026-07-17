@@ -1191,7 +1191,7 @@ UNITS_MAP = {
     'Cadmium': 'μg/L',
     'Copper': 'μg/L',
     'Zinc': 'μg/L',
-    'Calcium': 'μg/L',
+    'Calcium': 'mg/L',
     'Cobalt': 'μg/L',
     'Silver': 'μg/L',
     'Uranium': 'μg/L',
@@ -1203,7 +1203,7 @@ UNITS_MAP = {
     'Conductivity': 'μS/cm',
     'Specific conductance': 'μS/cm',
     'Flow': 'cfs',
-    'Hardness, Ca, Mg': 'mg/L',
+    'Hardness, Ca, Mg': 'mg/L as CaCO3',
     'Hardness, non-carbonate': 'mg/L',
     'Hardness, carbonate': 'mg/L',
     'Total hardness': 'mg/L',
@@ -1214,22 +1214,32 @@ UNITS_MAP = {
     'Escherichia coli': 'CFU/100mL',
     'Escherichia Coli': 'CFU/100mL',
     'Nitrogen': 'mg/L',
-    'Nitrate': 'mg/L',
-    'Nitrite': 'mg/L',
-    'Nitrate + Nitrite': 'mg/L',
-    'Nitrite + Nitrate': 'mg/L',
-    'Ammonia': 'mg/L',
-    'Ammonia-nitrogen': 'mg/L',
-    'Ammonia and ammonium': 'mg/L',
+    'Nitrate': 'mg/L as N',
+    'Nitrite': 'mg/L as N',
+    'Nitrate + Nitrite': 'mg/L as N',
+    'Nitrite + Nitrate': 'mg/L as N',
+    'Inorganic nitrogen (nitrate and nitrite)': 'mg/L as N',
+    'Ammonia': 'mg/L as N',
+    'Ammonia-nitrogen': 'mg/L as N',
+    'Ammonia and ammonium': 'mg/L as N',
+    'Ammonia and Ammonium': 'mg/L as N',
     'Phosphorus': 'mg/L',
     'Total Phosphorus': 'mg/L',
-    'Ammonium': 'mg/L',
-    'Orthophosphate': 'mg/L',
+    'Ammonium': 'mg/L as N',
+    'Kjeldahl nitrogen': 'mg/L as N',
+    'Kjeldahl Nitrogen': 'mg/L as N',
+    'Total Kjeldahl Nitrogen': 'mg/L as N',
+    'Orthophosphate': 'mg/L as P',
     'Phosphate-phosphorus': 'mg/L',
     'Sulfate': 'mg/L',
     'Salinity': 'ppt',
+    'Biochemical oxygen demand, standard conditions': 'mg/L',
+    'Biochemical oxygen demand': 'mg/L',
+    'Biochemical Oxygen Demand': 'mg/L',
     'Dissolved oxygen': 'mg/L',
+    'Dissolved oxygen (DO)': 'mg/L',
     'Dissolved Oxygen (DO)': 'mg/L',
+    'Dissolved oxygen saturation': '%',
     'Oxygen': 'mg/L'
 }
 
@@ -1283,8 +1293,9 @@ def standardize_water_quality_units(df):
     
     # NITROGEN COMPOUNDS: Keep in mg/L, convert ug/L to mg/L if needed
     nitrogen_compounds = ['Nitrogen', 'Nitrate', 'Nitrite', 'Nitrate + Nitrite', 
-                         'Nitrite + Nitrate', 'Ammonia', 'Ammonia-nitrogen', 
-                         'Ammonia and ammonium', 'Ammonium', 'Total Kjeldahl Nitrogen']
+                         'Nitrite + Nitrate', 'Inorganic nitrogen (nitrate and nitrite)',
+                         'Ammonia', 'Ammonia-nitrogen', 'Ammonia and ammonium',
+                         'Ammonium', 'Kjeldahl nitrogen', 'Total Kjeldahl Nitrogen']
     
     for compound in nitrogen_compounds:
         compound_ug = create_case_insensitive_mask(compound, ['ug/L', 'μg/L', 'UG/L', 'Ug/L', 'ug/l'])
@@ -1388,7 +1399,7 @@ def standardize_water_quality_units(df):
         print(f"Converted {count} temperature records: °F to °C")
     
     # DISSOLVED OXYGEN: Standardize to mg/L
-    do_chars = ['Dissolved oxygen', 'Dissolved Oxygen (DO)', 'Oxygen']
+    do_chars = ['Dissolved oxygen', 'Dissolved oxygen (DO)', 'Dissolved Oxygen (DO)', 'Oxygen']
     for do_char in do_chars:
         do_ug = create_case_insensitive_mask(do_char, ['ug/L', 'μg/L', 'UG/L', 'Ug/L', 'ug/l'])
         convert_and_log(do_ug, do_char, 'ug/L', 'mg/L', 0.001, 'μg/L to mg/L')
