@@ -736,6 +736,23 @@ app.index_string = '''
                 color: #ffffff !important;
                 font-size: 12px !important;
             }
+
+            .rc-slider-tooltip,
+            .rc-slider-tooltip * {
+                color: #111111 !important;
+                -webkit-text-fill-color: #111111 !important;
+            }
+
+            .rc-slider-tooltip-inner {
+                background-color: #ffffff !important;
+                color: #111111 !important;
+                border: 1px solid #777777 !important;
+                box-shadow: none !important;
+            }
+
+            .rc-slider-tooltip-arrow {
+                border-bottom-color: #ffffff !important;
+            }
             
             /* Table improvements */
             .dash-table-container {
@@ -775,6 +792,63 @@ app.index_string = '''
                     margin-left: 0 !important;
                     margin-bottom: 20px;
                 }
+            }
+
+            /* Force black text in all dcc.Dropdown components */
+            #root .dash-dropdown {
+                color: #111111 !important;
+
+                --Dash-Text-Strong: #111111 !important;
+                --Dash-Text-Weak: #111111 !important;
+                --Dash-Text-Disabled: #111111 !important;
+            }
+
+            #root .dash-dropdown,
+            #root .dash-dropdown * {
+                color: #111111 !important;
+                -webkit-text-fill-color: #111111 !important;
+            }
+
+            .dash-dropdown-content {
+                color: #111111 !important;
+
+                --Dash-Text-Strong: #111111 !important;
+                --Dash-Text-Weak: #111111 !important;
+                --Dash-Text-Disabled: #111111 !important;
+            }
+
+            .dash-dropdown-content,
+            .dash-dropdown-content * {
+                color: #111111 !important;
+                -webkit-text-fill-color: #111111 !important;
+            }
+
+            #root #dropdown-filters .dash-dropdown,
+            #root #dropdown-filters .dash-dropdown *,
+            #root #dropdown-filters .dash-dropdown-content,
+            #root #dropdown-filters .dash-dropdown-content * {
+                color: #111111 !important;
+                -webkit-text-fill-color: #111111 !important;
+            }
+
+            .Select-control,
+            .Select-control *,
+            .Select-menu-outer,
+            .Select-menu-outer *,
+            .Select-menu,
+            .Select-menu *,
+            .Select-option,
+            .Select-option *,
+            .Select-placeholder,
+            .Select-value,
+            .Select-value *,
+            .Select-value-label,
+            .VirtualizedSelectOption,
+            .VirtualizedSelectOption *,
+            .VirtualizedSelectFocusedOption,
+            .VirtualizedSelectFocusedOption * {
+                color: #111111 !important;
+                -webkit-text-fill-color: #111111 !important;
             }
         </style>
     </head>
@@ -1692,12 +1766,21 @@ app.layout = html.Div(
                         max=max_year,
                         step=1,
                         className='date-range-slider',
+                        allow_direct_input=False,
                         marks={
                             year: {'label': str(year), 'style': {'color': '#ffffff', 'font-size': '12px'}}
                             for year in range(min_year, max_year + 1, 2)
                         },
                         value=[min_year, max_year],
-                        tooltip={'placement': 'bottom', 'always_visible': False}
+                        tooltip={
+                            'placement': 'bottom',
+                            'always_visible': True,
+                            'style': {
+                                'color': '#111111',
+                                'backgroundColor': '#ffffff',
+                                'border': '1px solid #777777'
+                            }
+                        }
                     )
                 ], style={'margin-bottom': '20px'})
             ],
