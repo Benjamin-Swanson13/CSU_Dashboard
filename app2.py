@@ -1181,6 +1181,13 @@ def load_streams_gdf():
     return streams_gdf
 
 # Global units mapping - used throughout the dashboard
+NITROGEN_AS_N_CHARACTERISTICS = [
+    'Nitrogen, mixed forms',
+    'Nitrogen, mixed forms (NH3), (NH4), organic, (NO2) and (NO3)',
+    'Organic nitrogen',
+    'Organic Nitrogen',
+]
+
 UNITS_MAP = {
     'Selenium': 'μg/L',
     'Iron': 'μg/L', 
@@ -1241,20 +1248,50 @@ UNITS_MAP = {
     'Dissolved Oxygen (DO)': 'mg/L',
     'Dissolved oxygen saturation': '%',
     'Oxygen': 'mg/L',
-    'alpha-1,2,3,4,5,6-Hexachlorocyclohexane-D6, or alpha-HCH-D6': '%',
-    'Bisphenol A-d14': '%',
-    'Decafluorobiphenyl': '%',
+    #'.alpha.-1,2,3,4,5,6-Hexachlorocyclohexane-D6, or alpha-HCH-D6': '%',
+    #'Bisphenol A-d14': '%',
+    #'Decafluorobiphenyl': '%',
     'Fecal Coliform': 'CFU/100 mL',
     'Fecal Streptococcus Group Bacteria': 'CFU/100 mL',
     'Nitrogen, mixed forms': 'mg/L as N',
+    'Nitrogen, mixed forms (NH3), (NH4), organic, (NO2) and (NO3)': 'mg/L as N',
     'Organic nitrogen': 'mg/L as N',
-    'Oxygen-18/Oxygen-16 Ratio': 'δ¹⁸O (‰)',
+    'Organic Nitrogen': 'mg/L as N',
+    'Oxygen-18/Oxygen-16 Ratio': 'Standard Units',
     'Phenanthrene': 'μg/L',
-    'Sodium Adsorption Ratio': 'dimensionless',
+    'Sodium Adsorption Ratio': 'Standard Units',
     'Sodium, Percent Total Cations': '%',
     'Total Coliform': 'MPN/100 mL or CFU/100 mL',
     'Triphenyl Phosphate': 'μg/L',
 }
+
+def standardize_nitrogen_as_n_unit_labels(df):
+    if not {'Result_Characteristic', 'Result_MeasureUnit'}.issubset(df.columns):
+        return df
+
+    unit_text = df['Result_MeasureUnit'].astype('string').str.strip().str.lower().fillna('')
+    nitrogen_unit_mask = (
+        df['Result_Characteristic'].isin(NITROGEN_AS_N_CHARACTERISTICS)
+        & unit_text.isin([
+            '',
+            'unit',
+            'units',
+            'none',
+            'nan',
+            'n/a',
+            'na',
+            'mg/l',
+            'mg/l as n',
+        ])
+    )
+    if nitrogen_unit_mask.any():
+        df = df.copy()
+        if hasattr(df['Result_MeasureUnit'], 'cat') and 'mg/L as N' not in df['Result_MeasureUnit'].cat.categories:
+            df['Result_MeasureUnit'] = df['Result_MeasureUnit'].cat.add_categories(['mg/L as N'])
+        df.loc[nitrogen_unit_mask, 'Result_MeasureUnit'] = 'mg/L as N'
+        print(f"Standardized {nitrogen_unit_mask.sum()} nitrogen unit labels to mg/L as N")
+    return df
+
 
 # Convert units in CSU_df to standard units
 def standardize_water_quality_units(df):
@@ -1318,7 +1355,7 @@ def standardize_water_quality_units(df):
     nitrogen_compounds = ['Nitrogen', 'Nitrate', 'Nitrite', 'Nitrate + Nitrite', 
                          'Nitrite + Nitrate', 'Inorganic nitrogen (nitrate and nitrite)',
                          'Ammonia', 'Ammonia-nitrogen', 'Ammonia and ammonium',
-                         'Ammonium', 'Kjeldahl nitrogen', 'Total Kjeldahl Nitrogen']
+                         'Ammonium', 'Kjeldahl nitrogen', 'Total Kjeldahl Nitrogen'] + NITROGEN_AS_N_CHARACTERISTICS
     
     for compound in nitrogen_compounds:
         compound_ug = create_case_insensitive_mask(compound, ['ug/L', 'μg/L', 'UG/L', 'Ug/L', 'ug/l'])
@@ -1443,8 +1480,18 @@ def standardize_water_quality_units(df):
     assign_unit_if_generic(['Fecal Coliform'], 'CFU/100 mL')
     assign_unit_if_generic(['Fecal Streptococcus Group Bacteria'], 'CFU/100 mL')
 
-    assign_unit_if_generic(['Nitrogen, mixed forms'], 'mg/L as N')
-    assign_unit_if_generic(['Organic nitrogen'], 'mg/L as N')
+    assign_unit_if_generic(NITROGEN_AS_N_CHARACTERISTICS, 'mg/L as N')
+
+    nitrogen_unit_text = df_standardized['Result_MeasureUnit'].astype('string').str.strip().str.lower().fillna('')
+    nitrogen_plain_unit_mask = (
+        df_standardized['Result_Characteristic'].isin(NITROGEN_AS_N_CHARACTERISTICS)
+        & nitrogen_unit_text.isin(['mg/l', 'mg/l as n'])
+    )
+    if nitrogen_plain_unit_mask.any():
+        count = nitrogen_plain_unit_mask.sum()
+        df_standardized.loc[nitrogen_plain_unit_mask, 'Result_MeasureUnit'] = 'mg/L as N'
+        conversions_made.append(f"Nitrogen as N labels: {count} records standardized to mg/L as N")
+        print(f"Standardized {count} nitrogen unit labels to mg/L as N")
 
     mixed_nitrate_mask = create_case_insensitive_mask(
         'Nitrogen, mixed forms',
@@ -1453,6 +1500,19 @@ def standardize_water_quality_units(df):
     convert_and_log(
         mixed_nitrate_mask,
         'Nitrogen, mixed forms',
+        'mg/L as NO3',
+        'mg/L as N',
+        0.2259,
+        'mg/L as NO3 to mg/L as N'
+    )
+
+    long_mixed_nitrate_mask = create_case_insensitive_mask(
+        'Nitrogen, mixed forms (NH3), (NH4), organic, (NO2) and (NO3)',
+        ['mg/L as NO3', 'mg/l as no3', 'mg/L as nitrate', 'mg/l as nitrate', 'mg/L as NOâ‚ƒ', 'mg/l as noâ‚ƒ']
+    )
+    convert_and_log(
+        long_mixed_nitrate_mask,
+        'Nitrogen, mixed forms (NH3), (NH4), organic, (NO2) and (NO3)',
         'mg/L as NO3',
         'mg/L as N',
         0.2259,
@@ -1599,6 +1659,8 @@ else:
     print("\nUnit standardization complete; log file write skipped during app startup.")
     WQX_SITE_CATALOG = build_site_catalog(CSU_df)
     report_memory("after WQX standardization")
+
+CSU_df = standardize_nitrogen_as_n_unit_labels(CSU_df)
 
 # Read HUC8 centroids for basin dropdown
 huc_centroids = pd.read_csv(ASSET_DIR / 'HUC8_Centroids.csv')
