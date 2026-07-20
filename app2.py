@@ -1240,7 +1240,20 @@ UNITS_MAP = {
     'Dissolved oxygen (DO)': 'mg/L',
     'Dissolved Oxygen (DO)': 'mg/L',
     'Dissolved oxygen saturation': '%',
-    'Oxygen': 'mg/L'
+    'Oxygen': 'mg/L',
+    'alpha-1,2,3,4,5,6-Hexachlorocyclohexane-D6, or alpha-HCH-D6': '%',
+    'Bisphenol A-d14': '%',
+    'Decafluorobiphenyl': '%',
+    'Fecal Coliform': 'CFU/100 mL',
+    'Fecal Streptococcus Group Bacteria': 'CFU/100 mL',
+    'Nitrogen, mixed forms': 'mg/L as N',
+    'Organic nitrogen': 'mg/L as N',
+    'Oxygen-18/Oxygen-16 Ratio': 'δ¹⁸O (‰)',
+    'Phenanthrene': 'μg/L',
+    'Sodium Adsorption Ratio': 'dimensionless',
+    'Sodium, Percent Total Cations': '%',
+    'Total Coliform': 'MPN/100 mL or CFU/100 mL',
+    'Triphenyl Phosphate': 'μg/L',
 }
 
 # Convert units in CSU_df to standard units
@@ -1274,6 +1287,16 @@ def standardize_water_quality_units(df):
         char_mask = df_standardized['Result_Characteristic'] == characteristic
         unit_mask = df_standardized['Result_MeasureUnit'].str.lower().isin([u.lower() for u in units_list])
         return char_mask & unit_mask
+    
+    def assign_unit_if_generic(characteristics, new_unit):
+        generic_units = {'', 'unit', 'units', 'none', 'nan', 'n/a', 'na'}
+        raw_units = df_standardized['Result_MeasureUnit'].fillna('').astype(str).str.strip().str.lower()
+        mask = df_standardized['Result_Characteristic'].isin(characteristics) & raw_units.isin(generic_units)
+        if mask.any():
+            count = int(mask.sum())
+            df_standardized.loc[mask, 'Result_MeasureUnit'] = new_unit
+            conversions_made.append(f"{characteristics}: {count} records assigned {new_unit}")
+            print(f"Assigned {new_unit} to {count} records for {characteristics}")
     
     # TRACE METALS: mg/L to μg/L (these should be in μg/L)
     trace_metals = ['Selenium', 'Aluminum', 'Arsenic', 'Cadmium', 'Copper', 'Iron', 
@@ -1404,6 +1427,60 @@ def standardize_water_quality_units(df):
         do_ug = create_case_insensitive_mask(do_char, ['ug/L', 'μg/L', 'UG/L', 'Ug/L', 'ug/l'])
         convert_and_log(do_ug, do_char, 'ug/L', 'mg/L', 0.001, 'μg/L to mg/L')
     
+    # -------------------------------------------------------------------------
+    # DASHBOARD UNIT FIXES FOR CHARACTERISTICS THAT ARRIVE AS "unit"/generic
+    # -------------------------------------------------------------------------
+
+    assign_unit_if_generic(
+        [
+            'alpha-1,2,3,4,5,6-Hexachlorocyclohexane-D6, or alpha-HCH-D6',
+            'Bisphenol A-d14',
+            'Decafluorobiphenyl',
+        ],
+        '%'
+    )
+
+    assign_unit_if_generic(['Fecal Coliform'], 'CFU/100 mL')
+    assign_unit_if_generic(['Fecal Streptococcus Group Bacteria'], 'CFU/100 mL')
+
+    assign_unit_if_generic(['Nitrogen, mixed forms'], 'mg/L as N')
+    assign_unit_if_generic(['Organic nitrogen'], 'mg/L as N')
+
+    mixed_nitrate_mask = create_case_insensitive_mask(
+        'Nitrogen, mixed forms',
+        ['mg/L as NO3', 'mg/l as no3', 'mg/L as nitrate', 'mg/l as nitrate', 'mg/L as NO₃', 'mg/l as no₃']
+    )
+    convert_and_log(
+        mixed_nitrate_mask,
+        'Nitrogen, mixed forms',
+        'mg/L as NO3',
+        'mg/L as N',
+        0.2259,
+        'mg/L as NO3 to mg/L as N'
+    )
+
+    assign_unit_if_generic(['Oxygen-18/Oxygen-16 Ratio'], 'δ¹⁸O (‰)')
+    assign_unit_if_generic(['Phenanthrene'], 'μg/L')
+    assign_unit_if_generic(['Triphenyl Phosphate'], 'μg/L')
+    assign_unit_if_generic(['Sodium Adsorption Ratio'], 'dimensionless')
+    assign_unit_if_generic(['Sodium, Percent Total Cations'], '%')
+
+    total_coliform_mpn = create_case_insensitive_mask(
+        'Total Coliform',
+        ['MPN/100mL', 'MPN/100 mL', 'mpn/100ml', 'mpn/100 ml']
+    )
+    if total_coliform_mpn.any():
+        df_standardized.loc[total_coliform_mpn, 'Result_MeasureUnit'] = 'MPN/100 mL'
+        print(f"Renamed {int(total_coliform_mpn.sum())} Total Coliform records to MPN/100 mL")
+
+    total_coliform_cfu = create_case_insensitive_mask(
+        'Total Coliform',
+        ['CFU/100mL', 'CFU/100 mL', 'cfu/100ml', 'cfu/100 ml']
+    )
+    if total_coliform_cfu.any():
+        df_standardized.loc[total_coliform_cfu, 'Result_MeasureUnit'] = 'CFU/100 mL'
+        print(f"Renamed {int(total_coliform_cfu.sum())} Total Coliform records to CFU/100 mL")
+
     # Print summary
     print(f"\n=== UNIT STANDARDIZATION COMPLETE ===")
     print(f"Total conversions made: {len(conversions_made)}")
