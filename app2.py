@@ -1190,8 +1190,15 @@ NITROGEN_AS_N_CHARACTERISTICS = [
 
 STANDARD_UNIT_CHARACTERISTICS = [
     'Oxygen-18/Oxygen-16 Ratio',
+    'Oxygen-18/Oxygen-16 ratio',
     'Sodium Adsorption Ratio',
     'Sodium Absorption Ratio',
+    'Sodium adsorption ratio [(Na)/(sq root of 1/2 Ca + Mg)]',
+]
+
+MICROGRAM_PER_LITER_CHARACTERISTICS = [
+    'Triphenyl Phosphate',
+    'Triphenyl phosphate',
 ]
 
 HIDDEN_CHARACTERISTICS = {
@@ -1275,11 +1282,14 @@ UNITS_MAP = {
     'Organic nitrogen': 'mg/L as N',
     'Organic Nitrogen': 'mg/L as N',
     'Oxygen-18/Oxygen-16 Ratio': 'standard units',
+    'Oxygen-18/Oxygen-16 ratio': 'standard units',
     'Phenanthrene': 'μg/L',
     'Sodium Adsorption Ratio': 'standard units',
     'Sodium Absorption Ratio': 'standard units',
+    'Sodium adsorption ratio [(Na)/(sq root of 1/2 Ca + Mg)]': 'standard units',
     'Sodium, Percent Total Cations': '%',
     'Total Coliform': 'MPN/100 mL or CFU/100 mL',
+    'Triphenyl phosphate': 'μg/L',
     'Triphenyl Phosphate': 'μg/L',
 }
 
@@ -1694,6 +1704,7 @@ else:
 
 CSU_df = standardize_nitrogen_as_n_unit_labels(CSU_df)
 CSU_df = set_characteristic_unit_labels(CSU_df, STANDARD_UNIT_CHARACTERISTICS, 'standard units')
+CSU_df = set_characteristic_unit_labels(CSU_df, MICROGRAM_PER_LITER_CHARACTERISTICS, 'μg/L')
 
 hidden_characteristic_mask = CSU_df['Result_Characteristic'].isin(HIDDEN_CHARACTERISTICS)
 if hidden_characteristic_mask.any():
