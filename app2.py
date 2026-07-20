@@ -1188,6 +1188,23 @@ NITROGEN_AS_N_CHARACTERISTICS = [
     'Organic Nitrogen',
 ]
 
+STANDARD_UNIT_CHARACTERISTICS = [
+    'Oxygen-18/Oxygen-16 Ratio',
+    'Sodium Adsorption Ratio',
+    'Sodium Absorption Ratio',
+]
+
+HIDDEN_CHARACTERISTICS = {
+    '.alpha.-1,2,3,4,5,6-Hexachlorocyclohexane-D6, or alpha-HCH-D6',
+    '.alpha.-1,2,3,4,5,6-Hexachlorocyclohexane-D6 or alpha-HCH D6',
+    'alpha-1,2,3,4,5,6-Hexachlorocyclohexane-D6, or alpha-HCH-D6',
+    'alpha-1,2,3,4,5,6-Hexachlorocyclohexane-D6 or alpha-HCH D6',
+    'Bisphenol A-d14',
+    'Bisphenol d-14',
+    'Decafluorobiphenyl',
+    'Decaflourobiphenyl',
+}
+
 UNITS_MAP = {
     'Selenium': 'μg/L',
     'Iron': 'μg/L', 
@@ -1257,9 +1274,10 @@ UNITS_MAP = {
     'Nitrogen, mixed forms (NH3), (NH4), organic, (NO2) and (NO3)': 'mg/L as N',
     'Organic nitrogen': 'mg/L as N',
     'Organic Nitrogen': 'mg/L as N',
-    'Oxygen-18/Oxygen-16 Ratio': 'Standard Units',
+    'Oxygen-18/Oxygen-16 Ratio': 'standard units',
     'Phenanthrene': 'μg/L',
-    'Sodium Adsorption Ratio': 'Standard Units',
+    'Sodium Adsorption Ratio': 'standard units',
+    'Sodium Absorption Ratio': 'standard units',
     'Sodium, Percent Total Cations': '%',
     'Total Coliform': 'MPN/100 mL or CFU/100 mL',
     'Triphenyl Phosphate': 'μg/L',
@@ -1290,6 +1308,20 @@ def standardize_nitrogen_as_n_unit_labels(df):
             df['Result_MeasureUnit'] = df['Result_MeasureUnit'].cat.add_categories(['mg/L as N'])
         df.loc[nitrogen_unit_mask, 'Result_MeasureUnit'] = 'mg/L as N'
         print(f"Standardized {nitrogen_unit_mask.sum()} nitrogen unit labels to mg/L as N")
+    return df
+
+
+def set_characteristic_unit_labels(df, characteristics, unit_label):
+    if not {'Result_Characteristic', 'Result_MeasureUnit'}.issubset(df.columns):
+        return df
+
+    unit_mask = df['Result_Characteristic'].isin(characteristics)
+    if unit_mask.any():
+        df = df.copy()
+        if hasattr(df['Result_MeasureUnit'], 'cat') and unit_label not in df['Result_MeasureUnit'].cat.categories:
+            df['Result_MeasureUnit'] = df['Result_MeasureUnit'].cat.add_categories([unit_label])
+        df.loc[unit_mask, 'Result_MeasureUnit'] = unit_label
+        print(f"Standardized {unit_mask.sum()} records to {unit_label}")
     return df
 
 
@@ -1519,10 +1551,10 @@ def standardize_water_quality_units(df):
         'mg/L as NO3 to mg/L as N'
     )
 
-    assign_unit_if_generic(['Oxygen-18/Oxygen-16 Ratio'], 'δ¹⁸O (‰)')
+    assign_unit_if_generic(['Oxygen-18/Oxygen-16 Ratio'], 'standard units')
     assign_unit_if_generic(['Phenanthrene'], 'μg/L')
     assign_unit_if_generic(['Triphenyl Phosphate'], 'μg/L')
-    assign_unit_if_generic(['Sodium Adsorption Ratio'], 'dimensionless')
+    assign_unit_if_generic(['Sodium Adsorption Ratio', 'Sodium Absorption Ratio'], 'standard units')
     assign_unit_if_generic(['Sodium, Percent Total Cations'], '%')
 
     total_coliform_mpn = create_case_insensitive_mask(
@@ -1661,6 +1693,12 @@ else:
     report_memory("after WQX standardization")
 
 CSU_df = standardize_nitrogen_as_n_unit_labels(CSU_df)
+CSU_df = set_characteristic_unit_labels(CSU_df, STANDARD_UNIT_CHARACTERISTICS, 'standard units')
+
+hidden_characteristic_mask = CSU_df['Result_Characteristic'].isin(HIDDEN_CHARACTERISTICS)
+if hidden_characteristic_mask.any():
+    print(f"Removed {hidden_characteristic_mask.sum()} hidden surrogate characteristics from dashboard data")
+    CSU_df = CSU_df.loc[~hidden_characteristic_mask].copy()
 
 # Read HUC8 centroids for basin dropdown
 huc_centroids = pd.read_csv(ASSET_DIR / 'HUC8_Centroids.csv')
