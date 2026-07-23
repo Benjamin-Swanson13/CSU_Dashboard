@@ -1201,6 +1201,23 @@ MICROGRAM_PER_LITER_CHARACTERISTICS = [
     'Triphenyl phosphate',
 ]
 
+NITROGEN_DISPLAY_AS_N_CHARACTERISTICS = [
+    'Ammonia',
+    'Ammonia-nitrogen',
+    'Ammonia and ammonium',
+    'Ammonia and Ammonium',
+    'Ammonium',
+    'Inorganic nitrogen (nitrate and nitrite)',
+    'Kjeldahl nitrogen',
+    'Kjeldahl Nitrogen',
+    'Nitrate',
+    'Nitrate + Nitrite',
+    'Nitrite',
+    'Nitrite + Nitrate',
+    'Total Kjeldahl Nitrogen',
+    'Total Nitrogen, mixed forms',
+] + NITROGEN_AS_N_CHARACTERISTICS
+
 HIDDEN_CHARACTERISTICS = {
     '.alpha.-1,2,3,4,5,6-Hexachlorocyclohexane-D6, or alpha-HCH-D6',
     '.alpha.-1,2,3,4,5,6-Hexachlorocyclohexane-D6 or alpha-HCH D6',
@@ -1214,6 +1231,7 @@ HIDDEN_CHARACTERISTICS = {
 
 UNITS_MAP = {
     'Selenium': 'μg/L',
+    'Selenium, sieved': 'mg/kg',
     'Iron': 'μg/L', 
     'Arsenic': 'μg/L',
     'Lead': 'μg/L',
@@ -1241,8 +1259,16 @@ UNITS_MAP = {
     'Total suspended solids': 'mg/L',
     'Total Suspended Solids': 'mg/L',
     'Total dissolved solids': 'mg/L',
+    'Total dissolved solids, tons per acre-foot': 'tons/ac ft',
+    'Total dissolved solids, tons per day': 'tons/day',
     'Turbidity': 'NTU',
+    'Turbidity (FNU)': 'FNU',
+    'Turbidity (NTRU)': 'NTRU',
+    'Turbidity (NTU)': 'NTU',
     'Escherichia coli': 'CFU/100mL',
+    'Escherichia coli (MPN)': 'MPN/100mL',
+    'Escherichia coli (CFU)': 'CFU/100mL',
+    'Escherichia coli (#)': '#/100mL',
     'Escherichia Coli': 'CFU/100mL',
     'Nitrogen': 'mg/L',
     'Nitrate': 'mg/L as N',
@@ -1279,6 +1305,7 @@ UNITS_MAP = {
     'Fecal Streptococcus Group Bacteria': 'CFU/100 mL',
     'Nitrogen, mixed forms': 'mg/L as N',
     'Nitrogen, mixed forms (NH3), (NH4), organic, (NO2) and (NO3)': 'mg/L as N',
+    'Total Nitrogen, mixed forms': 'mg/L as N',
     'Organic nitrogen': 'mg/L as N',
     'Organic Nitrogen': 'mg/L as N',
     'Oxygen-18/Oxygen-16 Ratio': 'standard units',
@@ -1287,8 +1314,20 @@ UNITS_MAP = {
     'Sodium Adsorption Ratio': 'standard units',
     'Sodium Absorption Ratio': 'standard units',
     'Sodium adsorption ratio [(Na)/(sq root of 1/2 Ca + Mg)]': 'standard units',
+    'Sodium, percent total cations': '%',
     'Sodium, Percent Total Cations': '%',
+    'Temperature, sample': 'deg C',
+    'Chlorophyll a': 'ug/L',
+    'Chlorophyll a, corrected for pheophytin': 'ug/L',
+    'Pheophytin a': 'ug/L',
+    'Total Phosphorus, mixed forms': 'mg/L',
     'Total Coliform': 'MPN/100 mL or CFU/100 mL',
+    'Total Coliform (MPN)': 'MPN/100mL',
+    'Total Coliform (CFU)': 'CFU/100mL',
+    'Temperature, air': 'deg C',
+    'Uranium-238': 'ug/L',
+    'Alpha particle (pCi/L)': 'pCi/L',
+    'Alpha particle (ug/L)': 'ug/L',
     'Triphenyl phosphate': 'μg/L',
     'Triphenyl Phosphate': 'μg/L',
 }
@@ -1333,6 +1372,104 @@ def set_characteristic_unit_labels(df, characteristics, unit_label):
         df.loc[unit_mask, 'Result_MeasureUnit'] = unit_label
         print(f"Standardized {unit_mask.sum()} records to {unit_label}")
     return df
+
+
+def apply_unit_audit_fixes(df):
+    required = {'Result_Characteristic', 'Result_MeasureUnit', 'Result_Measure'}
+    if not required.issubset(df.columns):
+        return df
+
+    df = df.copy()
+
+    def add_categories(column, values):
+        if hasattr(df[column], 'cat'):
+            missing = [value for value in values if value not in df[column].cat.categories]
+            if missing:
+                df[column] = df[column].cat.add_categories(missing)
+
+    def unit_text():
+        return df['Result_MeasureUnit'].astype('string').str.strip().str.lower().fillna('')
+
+    new_characteristics = [
+        'Total dissolved solids, tons per acre-foot',
+        'Total dissolved solids, tons per day',
+        'Turbidity (FNU)',
+        'Turbidity (NTRU)',
+        'Turbidity (NTU)',
+        'Escherichia coli (MPN)',
+        'Escherichia coli (CFU)',
+        'Escherichia coli (#)',
+        'Total Coliform (MPN)',
+        'Total Coliform (CFU)',
+        'Alpha particle (pCi/L)',
+        'Alpha particle (ug/L)',
+    ]
+    add_categories('Result_Characteristic', new_characteristics)
+    add_categories('Result_MeasureUnit', ['mg/L', 'uS/cm', 'deg C', 'ug/L', 'tons/ac ft', 'tons/day', 'FNU', 'NTRU', 'NTU', 'MPN/100mL', 'CFU/100mL', '#/100mL', 'pCi/L'])
+
+    ppm_as_mg_l = [
+        'Total dissolved solids',
+        'Dissolved oxygen (DO)',
+        'Phosphorus',
+        'Nitrate',
+        'Magnesium',
+        'Sulfate',
+        'Calcium',
+        'Sodium',
+        'Potassium',
+        'Nitrogen',
+    ]
+    ppm_mask = df['Result_Characteristic'].isin(ppm_as_mg_l) & unit_text().eq('ppm')
+    if ppm_mask.any():
+        df.loc[ppm_mask, 'Result_MeasureUnit'] = 'mg/L'
+        print(f"Relabeled {ppm_mask.sum()} ppm records to mg/L")
+
+    sc_mask = (df['Result_Characteristic'] == 'Specific conductance') & unit_text().isin(['mmhos/cm', 'mmho/cm'])
+    if sc_mask.any():
+        df.loc[sc_mask, 'Result_Measure'] = pd.to_numeric(df.loc[sc_mask, 'Result_Measure'], errors='coerce') * 1000
+        df.loc[sc_mask, 'Result_MeasureUnit'] = 'uS/cm'
+        print(f"Converted {sc_mask.sum()} specific conductance records from mmhos/cm to uS/cm")
+
+    air_f_mask = (df['Result_Characteristic'] == 'Temperature, air') & unit_text().isin(['deg f', 'f', '°f'])
+    if air_f_mask.any():
+        df.loc[air_f_mask, 'Result_Measure'] = (pd.to_numeric(df.loc[air_f_mask, 'Result_Measure'], errors='coerce') - 32) * 5 / 9
+        df.loc[air_f_mask, 'Result_MeasureUnit'] = 'deg C'
+        print(f"Converted {air_f_mask.sum()} air temperature records from deg F to deg C")
+
+    uranium_238_mg_l = (df['Result_Characteristic'] == 'Uranium-238') & unit_text().eq('mg/l')
+    if uranium_238_mg_l.any():
+        df.loc[uranium_238_mg_l, 'Result_Measure'] = pd.to_numeric(df.loc[uranium_238_mg_l, 'Result_Measure'], errors='coerce') * 1000
+        df.loc[uranium_238_mg_l, 'Result_MeasureUnit'] = 'ug/L'
+        print(f"Converted {uranium_238_mg_l.sum()} Uranium-238 records from mg/L to ug/L")
+
+    split_rules = [
+        ('Total dissolved solids', {'tons/ac ft': ('Total dissolved solids, tons per acre-foot', 'tons/ac ft'), 'tons/day': ('Total dissolved solids, tons per day', 'tons/day')}),
+        ('Turbidity', {'fnu': ('Turbidity (FNU)', 'FNU'), 'ntru': ('Turbidity (NTRU)', 'NTRU'), 'ntu': ('Turbidity (NTU)', 'NTU')}),
+        ('Escherichia coli', {'mpn/100ml': ('Escherichia coli (MPN)', 'MPN/100mL'), 'cfu/100ml': ('Escherichia coli (CFU)', 'CFU/100mL'), '#/100ml': ('Escherichia coli (#)', '#/100mL')}),
+        ('Total Coliform', {'mpn/100ml': ('Total Coliform (MPN)', 'MPN/100mL'), 'cfu/100ml': ('Total Coliform (CFU)', 'CFU/100mL')}),
+        ('Alpha particle', {'pci/l': ('Alpha particle (pCi/L)', 'pCi/L'), 'ug/l': ('Alpha particle (ug/L)', 'ug/L')}),
+    ]
+    units = unit_text()
+    for source_characteristic, unit_map in split_rules:
+        for source_unit, (target_characteristic, target_unit) in unit_map.items():
+            mask = (df['Result_Characteristic'] == source_characteristic) & units.eq(source_unit)
+            if mask.any():
+                df.loc[mask, 'Result_Characteristic'] = target_characteristic
+                df.loc[mask, 'Result_MeasureUnit'] = target_unit
+                print(f"Split {mask.sum()} {source_characteristic} records into {target_characteristic}")
+
+    return df
+
+
+def backfill_units_map_from_data(df):
+    if not {'Result_Characteristic', 'Result_MeasureUnit', 'Result_Measure'}.issubset(df.columns):
+        return
+
+    valid = df[pd.to_numeric(df['Result_Measure'], errors='coerce').notna()]
+    for characteristic, group in valid.groupby('Result_Characteristic', observed=True):
+        units = group['Result_MeasureUnit'].dropna().astype(str).str.strip().unique()
+        if len(units) == 1 and UNITS_MAP.get(characteristic, 'units') == 'units':
+            UNITS_MAP[str(characteristic)] = units[0]
 
 
 # Convert units in CSU_df to standard units
@@ -1703,13 +1840,34 @@ else:
     report_memory("after WQX standardization")
 
 CSU_df = standardize_nitrogen_as_n_unit_labels(CSU_df)
+CSU_df = set_characteristic_unit_labels(CSU_df, NITROGEN_DISPLAY_AS_N_CHARACTERISTICS, 'mg/L as N')
+CSU_df = set_characteristic_unit_labels(CSU_df, ['Orthophosphate'], 'mg/L as P')
+CSU_df = set_characteristic_unit_labels(CSU_df, ['Hardness, Ca, Mg'], 'mg/L as CaCO3')
 CSU_df = set_characteristic_unit_labels(CSU_df, STANDARD_UNIT_CHARACTERISTICS, 'standard units')
 CSU_df = set_characteristic_unit_labels(CSU_df, MICROGRAM_PER_LITER_CHARACTERISTICS, 'μg/L')
+
+CSU_df = apply_unit_audit_fixes(CSU_df)
+
+selenium_sieved_mask = (
+    (CSU_df['Result_Characteristic'] == 'Selenium')
+    & (CSU_df['Result_SampleFraction'] == 'Sieved')
+)
+if selenium_sieved_mask.any():
+    CSU_df = CSU_df.copy()
+    if hasattr(CSU_df['Result_Characteristic'], 'cat') and 'Selenium, sieved' not in CSU_df['Result_Characteristic'].cat.categories:
+        CSU_df['Result_Characteristic'] = CSU_df['Result_Characteristic'].cat.add_categories(['Selenium, sieved'])
+    if hasattr(CSU_df['Result_MeasureUnit'], 'cat') and 'mg/kg' not in CSU_df['Result_MeasureUnit'].cat.categories:
+        CSU_df['Result_MeasureUnit'] = CSU_df['Result_MeasureUnit'].cat.add_categories(['mg/kg'])
+    CSU_df.loc[selenium_sieved_mask, 'Result_Characteristic'] = 'Selenium, sieved'
+    CSU_df.loc[selenium_sieved_mask, 'Result_MeasureUnit'] = 'mg/kg'
+    print(f"Separated {selenium_sieved_mask.sum()} sieved Selenium records into Selenium, sieved")
 
 hidden_characteristic_mask = CSU_df['Result_Characteristic'].isin(HIDDEN_CHARACTERISTICS)
 if hidden_characteristic_mask.any():
     print(f"Removed {hidden_characteristic_mask.sum()} hidden surrogate characteristics from dashboard data")
     CSU_df = CSU_df.loc[~hidden_characteristic_mask].copy()
+
+backfill_units_map_from_data(CSU_df)
 
 # Read HUC8 centroids for basin dropdown
 huc_centroids = pd.read_csv(ASSET_DIR / 'HUC8_Centroids.csv')
