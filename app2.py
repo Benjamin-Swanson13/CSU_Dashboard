@@ -1262,13 +1262,13 @@ UNITS_MAP = {
     'Total dissolved solids, tons per acre-foot': 'tons/ac ft',
     'Total dissolved solids, tons per day': 'tons/day',
     'Turbidity': 'NTU',
-    'Turbidity (FNU)': 'FNU',
-    'Turbidity (NTRU)': 'NTRU',
-    'Turbidity (NTU)': 'NTU',
+    'Turbidity (FNU)': '',
+    'Turbidity (NTRU)': '',
+    'Turbidity (NTU)': '',
     'Escherichia coli': 'CFU/100mL',
-    'Escherichia coli (MPN)': 'MPN/100mL',
-    'Escherichia coli (CFU)': 'CFU/100mL',
-    'Escherichia coli (#)': '#/100mL',
+    'Escherichia coli (MPN/100mL)': '',
+    'Escherichia coli (CFU/100mL)': '',
+    'Escherichia coli (#/100mL)': '',
     'Escherichia Coli': 'CFU/100mL',
     'Nitrogen': 'mg/L',
     'Nitrate': 'mg/L as N',
@@ -1322,8 +1322,8 @@ UNITS_MAP = {
     'Pheophytin a': 'ug/L',
     'Total Phosphorus, mixed forms': 'mg/L',
     'Total Coliform': 'MPN/100 mL or CFU/100 mL',
-    'Total Coliform (MPN)': 'MPN/100mL',
-    'Total Coliform (CFU)': 'CFU/100mL',
+    'Total Coliform (MPN/100mL)': '',
+    'Total Coliform (CFU/100mL)': '',
     'Temperature, air': 'deg C',
     'Uranium-238': 'ug/L',
     'Alpha particle (pCi/L)': 'pCi/L',
@@ -1396,11 +1396,11 @@ def apply_unit_audit_fixes(df):
         'Turbidity (FNU)',
         'Turbidity (NTRU)',
         'Turbidity (NTU)',
-        'Escherichia coli (MPN)',
-        'Escherichia coli (CFU)',
-        'Escherichia coli (#)',
-        'Total Coliform (MPN)',
-        'Total Coliform (CFU)',
+        'Escherichia coli (MPN/100mL)',
+        'Escherichia coli (CFU/100mL)',
+        'Escherichia coli (#/100mL)',
+        'Total Coliform (MPN/100mL)',
+        'Total Coliform (CFU/100mL)',
         'Alpha particle (pCi/L)',
         'Alpha particle (ug/L)',
     ]
@@ -1445,8 +1445,8 @@ def apply_unit_audit_fixes(df):
     split_rules = [
         ('Total dissolved solids', {'tons/ac ft': ('Total dissolved solids, tons per acre-foot', 'tons/ac ft'), 'tons/day': ('Total dissolved solids, tons per day', 'tons/day')}),
         ('Turbidity', {'fnu': ('Turbidity (FNU)', 'FNU'), 'ntru': ('Turbidity (NTRU)', 'NTRU'), 'ntu': ('Turbidity (NTU)', 'NTU')}),
-        ('Escherichia coli', {'mpn/100ml': ('Escherichia coli (MPN)', 'MPN/100mL'), 'cfu/100ml': ('Escherichia coli (CFU)', 'CFU/100mL'), '#/100ml': ('Escherichia coli (#)', '#/100mL')}),
-        ('Total Coliform', {'mpn/100ml': ('Total Coliform (MPN)', 'MPN/100mL'), 'cfu/100ml': ('Total Coliform (CFU)', 'CFU/100mL')}),
+        ('Escherichia coli', {'mpn/100ml': ('Escherichia coli (MPN/100mL)', 'MPN/100mL'), 'cfu/100ml': ('Escherichia coli (CFU/100mL)', 'CFU/100mL'), '#/100ml': ('Escherichia coli (#/100mL)', '#/100mL')}),
+        ('Total Coliform', {'mpn/100ml': ('Total Coliform (MPN/100mL)', 'MPN/100mL'), 'cfu/100ml': ('Total Coliform (CFU/100mL)', 'CFU/100mL')}),
         ('Alpha particle', {'pci/l': ('Alpha particle (pCi/L)', 'pCi/L'), 'ug/l': ('Alpha particle (ug/L)', 'ug/L')}),
     ]
     units = unit_text()
@@ -1470,6 +1470,10 @@ def backfill_units_map_from_data(df):
         units = group['Result_MeasureUnit'].dropna().astype(str).str.strip().unique()
         if len(units) == 1 and UNITS_MAP.get(characteristic, 'units') == 'units':
             UNITS_MAP[str(characteristic)] = units[0]
+
+
+def characteristic_with_unit(characteristic, unit):
+    return str(characteristic) if not unit else f"{characteristic} ({unit})"
 
 
 # Convert units in CSU_df to standard units
@@ -2810,7 +2814,7 @@ def toggle_site_modal(clickData, close_clicks, date_range, is_open):
                     unit = UNITS_MAP.get(characteristic, 'units')
                     
                     stats_data.append({
-                        'Characteristic': f"{characteristic} ({unit})",
+                        'Characteristic': characteristic_with_unit(characteristic, unit),
                         'Organization': org_display,
                         'Min': f"{numeric_values.min():.3f}",
                         'Max': f"{numeric_values.max():.3f}",
@@ -4962,7 +4966,7 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
         # Primary y-axis (left)
         layout_config['yaxis'] = dict(
             title=dict(
-                text=f'{characteristic} ({unit})',
+                text=characteristic_with_unit(characteristic, unit),
                 font=dict(color='white', size=14)
             ),
             gridcolor='#404040',
@@ -4991,7 +4995,7 @@ def plot_data(characteristic, fraction, basin, site, sample_type, date_range, ad
         # Just primary y-axis
         layout_config['yaxis'] = dict(
             title=dict(
-                text=f'{characteristic} ({unit})',
+                text=characteristic_with_unit(characteristic, unit),
                 font=dict(color='white', size=14)
             ),
             gridcolor='#404040',
@@ -5875,7 +5879,7 @@ def plot_heatmap(characteristic, fraction, basin, site, sample_type, date_range)
         colorscale = create_data_driven_color_scale(numeric_values),
         colorbar=dict(
            title=dict(
-                text=f"{original_characteristic}<br>({unit})",
+                text=str(original_characteristic) if not unit else f"{original_characteristic}<br>({unit})",
                 font=dict(color='white', size=12)
             ),
             tickfont=dict(color='white'),
@@ -5916,7 +5920,11 @@ def plot_heatmap(characteristic, fraction, basin, site, sample_type, date_range)
             title=dict(text='Monitoring Location', font=dict(color='white'))
         ),
         title=dict(
-            text=f'{original_characteristic} Concentration Heatmap ({unit})<br><sub>Range: {min_val:.2f}-{max_val:.2f} {unit} | Median: {median_val:.2f} {unit}</sub>',
+            text=(
+                f'{original_characteristic} Concentration Heatmap<br><sub>Range: {min_val:.2f}-{max_val:.2f} | Median: {median_val:.2f}</sub>'
+                if not unit
+                else f'{original_characteristic} Concentration Heatmap ({unit})<br><sub>Range: {min_val:.2f}-{max_val:.2f} {unit} | Median: {median_val:.2f} {unit}</sub>'
+            ),
             font=dict(color='white', size=16),
             x=0.5
         ),
